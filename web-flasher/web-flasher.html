@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CH552G CFW Flasher</title>
+<style>  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #07080a; --panel: #101111; --panel2: #151719;
+    --border: rgba(255,255,255,.07); --border2: rgba(255,255,255,.14);
+    --text: #f9f9f9; --sub: #9c9c9d; --dim: #5f6162;
+    --accent: #3ecf8e; --blue: #55b3ff; --danger: #ff6363; --warn: #ffbc33;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  body {
+    font-family: 'Inter', -apple-system, 'Segoe UI', 'Hiragino Kaku Gothic ProN', sans-serif;
+    background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased;
+    line-height: 1.55; min-height: 100vh;
+    background-image: radial-gradient(800px 320px at 50% -100px, rgba(62,207,142,.06), transparent);
+  }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 32px 22px 60px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .logo { width: 32px; height: 32px; border-radius: 9px; background: #12140f;
+    border: 1px solid rgba(62,207,142,.45); color: var(--accent);
+    display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  header h1 { font-size: 18px; font-weight: 700; letter-spacing: .2px; white-space: nowrap; }
+  .pill { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--sub);
+    border: 1px solid var(--border2); padding: 4px 12px; border-radius: 999px; white-space: nowrap; }
+  .pill i { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--dim); margin-right: 6px; }
+  .pill.live i { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .pill.live { color: var(--text); border-color: rgba(62,207,142,.4); }
+  .grid { display: grid; grid-template-columns: 380px 1fr; gap: 14px; align-items: start; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+  .card + .card { margin-top: 14px; }
+  .kicker { font-family: var(--mono); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase;
+    color: var(--dim); margin-bottom: 10px; }
+  .fwver { margin-bottom: 2px; }
+  .fwver b { font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
+  .fwdate { font-size: 12.5px; color: var(--sub); margin-bottom: 12px; }
+  .meta { display: flex; flex-direction: column; gap: 7px; }
+  .meta .row { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; }
+  .meta .k { color: var(--dim); flex-shrink: 0; }
+  .meta .v { font-family: var(--mono); font-size: 12px; color: var(--sub); text-align: right; word-break: break-all; }
+  .meta .v.ok { color: var(--accent); }
+  .local { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12.5px; }
+  .local label { color: var(--sub); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .local .back { margin-left: 8px; color: var(--dim); cursor: pointer;
+    text-decoration: underline; text-underline-offset: 3px; display: none; }
+  .local.using .back { display: inline; }
+  .stepbtn { width: 100%; margin-top: 12px; padding: 12px; border-radius: 10px; cursor: pointer;
+    font-family: inherit; font-size: 14px; font-weight: 700; border: none;
+    background: var(--accent); color: #06110c; }
+  .stepbtn:hover:not(:disabled) { filter: brightness(1.08); }
+  .stepbtn:disabled { background: #22262b; color: var(--dim); cursor: default; }
+  .stepbtn.done { background: transparent; border: 1px solid rgba(62,207,142,.4); color: var(--accent); cursor: default; }
+  .stepnote { font-size: 12px; color: var(--dim); margin-top: 8px; }
+  .stepnum { display: inline-flex; width: 20px; height: 20px; border-radius: 50%;
+    background: rgba(255,255,255,.07); color: var(--sub); font-size: 11px; font-weight: 700;
+    align-items: center; justify-content: center; margin-right: 7px; font-family: var(--mono); }
+  .steptitle { font-size: 13.5px; font-weight: 600; margin-bottom: 2px; }
+  .console { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .conhead { display: flex; align-items: center; gap: 8px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
+  .conhead .dots { display: flex; gap: 6px; }
+  .conhead .dots i { width: 10px; height: 10px; border-radius: 50%; background: #2a2d30; }
+  .conhead .t { font-family: var(--mono); font-size: 11.5px; color: var(--dim); margin-left: 4px; }
+  .conhead button { margin-left: auto; background: none; border: 1px solid var(--border);
+    color: var(--dim); font-size: 11px; border-radius: 6px; padding: 3px 9px; cursor: pointer; font-family: var(--mono); }
+  #log { font-family: var(--mono); font-size: 12px; padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 4px; min-height: 220px; max-height: 320px; overflow: auto; }
+  #log .ok { color: var(--accent); } #log .err { color: var(--danger); }
+  #log .hex { color: var(--warn); } #log .inf { color: var(--blue); }
+  #log div { color: var(--sub); }
+  .confoot { padding: 14px 16px 16px; border-top: 1px solid var(--border); }
+  .track { height: 8px; border-radius: 99px; background: rgba(255,255,255,.07); overflow: hidden; margin-bottom: 8px; }
+  #barfill { height: 100%; width: 0%; background: var(--accent); border-radius: 99px; transition: width .15s linear; }
+  .stagerow { display: flex; justify-content: space-between; font-size: 12px; color: var(--sub); margin-bottom: 4px; }
+  .stagerow b { font-family: var(--mono); font-weight: 500; color: var(--text); }
+  .warnbar { display: none; margin-top: 10px; font-size: 12.5px; color: var(--warn);
+    border: 1px solid rgba(255,188,51,.3); background: rgba(255,188,51,.06);
+    border-radius: 8px; padding: 8px 12px; }
+  .warnbar.on { display: block; }
+  .dbg { display: none; }
+  body.debug .dbg { display: block; }
+  .dbgcard { margin-top: 14px; font-size: 12.5px; color: var(--sub); }
+  .dbgcard h2 { font-size: 13px; color: var(--text); margin-bottom: 10px; }
+  .dbgcard button { font-family: inherit; font-size: 12.5px; padding: 7px 12px; margin: 3px;
+    border-radius: 8px; border: 1px solid var(--border2); background: var(--panel2); color: var(--text); cursor: pointer; }
+  .dbgcard button:hover { background: rgba(255,255,255,.05); }
+  .dbgcard button:disabled { opacity: .35; cursor: default; }
+  .dbgcard .note { color: var(--dim); font-size: 12px; margin-top: 10px; }
+  .dbgcard code { font-family: var(--mono); font-size: 11.5px; }
+  .foot { text-align: center; font-size: 11.5px; color: var(--dim); margin-top: 22px; font-family: var(--mono); }
+  [hidden] { display: none !important; }</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">⌨</div>
+    <h1>CH552G CFW Flasher</h1>
+    <div class="pill" id="pill"><i></i><span id="devinfo">未接続</span></div>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <div class="kicker">Firmware</div>
+        <div class="fwver"><b id="fwv">—</b></div>
+        <div class="fwdate" id="fwdate">読込中…</div>
+        <div class="meta">
+          <div class="row"><span class="k">サイズ</span><span class="v" id="fwsize">—</span></div>
+          <div class="row"><span class="k">SHA-256</span><span class="v" id="fwsha">—</span></div>
+        </div>
+        <div class="local" id="localbox">
+          <label for="localfile">ローカルのファームウェアを使う</label><span class="back" id="localback">最新版に戻す</span>
+          <input type="file" id="localfile" accept=".bin" hidden>
+        </div>
+        <select id="fwlist" hidden></select>
+      </div>
+
+      <div class="card">
+        <div class="kicker">Steps</div>
+        <div class="steptitle"><span class="stepnum">1</span>キーパッドを接続</div>
+        <div class="stepnote">ISPモードのキーパッドを接続する。ISPモードにするには <a href="https://github.com/konohana-tech/ch552g-keyboard-cfw/blob/main/README.md#isp%E3%83%A2%E3%83%BC%E3%83%89%E3%81%AB%E3%81%99%E3%82%8B%E3%81%AB%E3%81%AF" target="_blank" rel="noopener" style="color: var(--sub);">README.md</a> を参照。</div>
+        <button class="stepbtn" id="connect" disabled>キーパッドを接続する</button>
+        <div style="height:16px"></div>
+        <div class="steptitle"><span class="stepnum">2</span>書き込む</div>
+        <div class="stepnote" id="flashnote">先にキーパッドを接続してください。</div>
+        <button class="stepbtn" id="flash" disabled>書き込み開始</button>
+      </div>
+    </div>
+
+    <div class="card console">
+      <div class="conhead"><div class="dots"><i></i><i></i><i></i></div><span class="t">ch552-isp — console</span><button id="copylog">copy</button></div>
+      <div id="log"><div>待機中…</div></div>
+      <div class="confoot">
+        <div class="track"><div id="barfill"></div></div>
+        <div class="stagerow"><span id="stage">ファームウェアを選んでください。</span><b id="pct">—</b></div>
+        <div class="warnbar" id="warn">⚠ 終わるまで抜かないでください</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dbg card dbgcard">
+    <h2>保守 (デバッグ用)</h2>
+    <button id="paired">ペア済み一覧</button>
+    <button id="forgetall">全ペア消去</button>
+    <button id="forget" disabled>選択の許可消去</button>
+    <span class="note">許可掃除: <code>chrome://settings/content/usbDevices</code></span>
+    <button id="copyusb">コピー</button>
+    <div>WebUSB: <span id="compat">…</span></div>
+    <p class="note">安全設計: CH552 (family <code>0x11</code> / type <code>0x52</code>) 以外は拒否。
+config 書込 (<code>0xA8</code>) は送らない。bootloader 版が既知 (<code>2.3.1/2.4.0–2.9.0</code>) 以外は中断。
+14,336B 超は拒否。書込後は必ずデバイス側ベリファイ (<code>0xA6</code>) を実行。<br>
+Linux udev (Vial用 1209:0001 とは別に必要。ISPモードは 4348:55E0 / 1a86:55e0):
+/etc/udev/rules.d/99-ch55x-isp.rules に以下2行。反映後、抜き差しして再試行。
+SUBSYSTEM=="usb", ATTR{idVendor}=="4348", ATTR{idProduct}=="55e0", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="55e0", MODE="0666"</p>
+  </div>
+
+  <div class="foot">ISP 4348:55e0 only ・ no config write ・ verify after write</div>
+</div>
+
+<script>
+let ROOT = new URL('./', document.baseURI);
+let MANIFEST_URL = new URL('firmware/manifest.json', ROOT);
+// ページ位置に依存せず manifest を探す：
+// ・Pages 配備（ページと firmware/ が同階層）→ ./firmware/manifest.json
+// ・リポジトリ直開き（web-flasher/ 配下から開く）→ ../firmware/manifest.json
+async function findManifest() {
+  const bases = [new URL('./', document.baseURI), new URL('../', document.baseURI)];
+  for (const b of bases) {
+    const u = new URL('firmware/manifest.json', b);
+    try {
+      const r = await fetch(u, { cache: 'no-store' });
+      if (r.ok) return { base: b, url: u, data: await r.json() };
+    } catch (e) { /* 次の候補へ */ }
+  }
+  throw new Error('HTTP 404');
+}
+
+const DEBUG = (() => { try { return new URLSearchParams(location.search).get('debug') === '1'; } catch (e) { return true; } })();
+try { document.body.classList.toggle('debug', DEBUG); } catch (e) {}
+
+let EP_OUT = 2, EP_IN = 2, IFACE = 0; 
+const CH552 = { family: 0x11, type: 0x52, flashSize: 14336, idLen: 4 };
+const SUPPORTED_BV = [0x020301, 0x020400, 0x020500, 0x020600, 0x020700, 0x020800, 0x020900];
+
+let device = null, fwBytes = null, fwName = '';
+let usingLocal = false;
+
+const $ = (id) => document.getElementById(id);
+const log = (s, cls='') => {
+  const box = $('log');
+  if (box.firstChild && box.firstChild.textContent === '待機中…') box.innerHTML = '';
+  const d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = s;
+  box.appendChild(d);
+  box.scrollTop = 1e9;
+  if (!DEBUG && cls === 'err') setStatus(s);
+};
+const dlog = (s, cls='') => { if (DEBUG) log(s, cls); }; 
+const setStatus = (s) => { $('stage').textContent = s; };
+const hex = (u8, n=32) => Array.from(u8.slice(0, n)).map(b => b.toString(16).padStart(2,'0')).join(' ');
+const progress = (f) => {
+  $('barfill').style.width = (f*100).toFixed(1) + '%';
+  $('pct').textContent = (f*100).toFixed(0) + '%';
+};
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const setPill = (live) => { $('pill').classList.toggle('live', !!live); };
+
+async function usbXfer(reqBytes, expectLen = 64, timeoutMs = 5000) {
+  await device.transferOut(EP_OUT, reqBytes);
+  const p = device.transferIn(EP_IN, expectLen);
+  const res = await Promise.race([
+    p, sleep(timeoutMs).then(() => { throw new Error('transferIn timeout'); })
+  ]);
+  if (res.status !== 'ok') throw new Error('transferIn status: ' + res.status);
+  return new Uint8Array(res.data.buffer);
+}
+function checkResp(resp, cmd) {
+  if (resp.length < 4) throw new Error('短すぎる応答 (' + resp.length + 'B)');
+  if (resp[0] !== cmd) throw new Error('応答コマンド不一致: 期待 ' + cmd.toString(16) + ' 実際 ' + resp[0].toString(16));
+  const code = resp[4] | (resp[5] << 8);
+  return code;
+}
+const le16 = (v) => [v & 0xff, (v >> 8) & 0xff];
+const le32 = (v) => [v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff];
+
+async function sha256hex(u8) {
+  const d = await crypto.subtle.digest('SHA-256', u8);
+  return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+let manifestReleases = []; 
+async function loadManifest() {
+  const sel = $('fwlist');
+  sel.innerHTML = '';
+  try {
+    const found = await findManifest();
+    ROOT = found.base;
+    MANIFEST_URL = found.url;
+    const m = found.data;
+    if (!m.releases || !m.releases.length) throw new Error('releases が空');
+    manifestReleases = m.releases;
+    for (const rel of m.releases) {
+      const o = document.createElement('option');
+      o.value = rel.file;
+      o.textContent = rel.version + ' (' + rel.size + 'B)';
+      sel.appendChild(o);
+    }
+    dlog('manifest: ' + m.releases.length + ' 件', 'inf');
+    if (m.releases.length === 1) {
+      sel.value = m.releases[0].file;
+      sel.hidden = true;
+      dlog('単一版のため自動読込', 'inf');
+      await loadSelectedFirmware();
+    } else {
+      sel.hidden = false;
+      sel.value = m.releases[m.releases.length - 1].file;
+      setStatus('ファームウェア一覧が複数あります。最新版を指定してください。');
+    }
+  } catch (e) {
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = '(一覧なし — ローカルファイルを使用)';
+    sel.appendChild(o);
+    log('ファームウェア一覧の取得に失敗。ローカルファイルを選択してください。(' + e.message + ')', 'err');
+  }
+}
+
+async function setFirmware(u8, name) {
+  if (u8.length > CH552.flashSize) {
+    log('サイズ超過: ' + u8.length + 'B > 14336B。拒否。', 'err');
+    fwBytes = null; $('flash').disabled = true; return;
+  }
+  const padded = new Uint8Array((u8.length + 7) & ~7);
+  padded.fill(0xff);
+  padded.set(u8);
+  fwBytes = padded; fwName = name;
+  const h = await sha256hex(u8);
+  const rel = manifestReleases.find(r => r.file === name);
+  $('fwv').textContent = rel ? rel.version : name;
+  $('fwdate').textContent = rel ? (rel.date ? rel.date + ' 公開' : '最新版') : 'ローカルファイル';
+  $('fwsize').textContent = u8.length + ' B';
+  const shaEl = $('fwsha');
+  if (rel && rel.sha256) {
+    if (String(rel.sha256).toLowerCase() === h.toLowerCase()) {
+      shaEl.textContent = h.slice(0, 8) + '…' + h.slice(-4) + ' ✓';
+      shaEl.classList.add('ok');
+    } else {
+      shaEl.textContent = h.slice(0, 8) + '…' + h.slice(-4) + ' ⚠不一致';
+      shaEl.classList.remove('ok');
+    }
+  } else {
+    shaEl.textContent = h.slice(0, 8) + '…' + h.slice(-4) + '（manifest対象外）';
+    shaEl.classList.remove('ok');
+  }
+  dlog('FW SHA256=' + h, 'hex');
+  setStatus('FW準備OK: ' + name + ' (' + u8.length + 'B)。キーパッドを挿して接続してください。');
+  log('FW 準備OK: ' + name + ' ' + u8.length + 'B', 'ok');
+  $('flash').disabled = !device;
+  $('connect').disabled = false; 
+}
+
+async function loadSelectedFirmware() {
+  const f = $('fwlist').value;
+  if (!f) return;
+  dlog('取得中: ' + f, 'inf');
+  const r = await fetch(new URL(f, ROOT), { cache: 'no-store' });
+  if (!r.ok) { setStatus('取得失敗: HTTP ' + r.status); log('取得失敗: HTTP ' + r.status, 'err'); return; }
+  usingLocal = false;
+  $('localbox').classList.remove('using');
+  setFirmware(new Uint8Array(await r.arrayBuffer()), f);
+}
+$('localfile').onchange = async (ev) => {
+  const f = ev.target.files[0];
+  if (!f) return;
+  usingLocal = true;
+  $('localbox').classList.add('using');
+  setFirmware(new Uint8Array(await f.arrayBuffer()), f.name + ' (local)');
+};
+$('localback').onclick = async () => { await loadSelectedFirmware(); };
+
+function dumpDevice(d, tag) {
+  const cfg = d.configuration;
+  const ifs = ((cfg && cfg.interfaces) || []).map(i => i.interfaceNumber).join(',');
+  dlog(tag + ': product=' + (d.productName || '(none)') +
+    ' manuf=' + (d.manufacturerName || '(none)') +
+    ' VID:PID=' + d.vendorId.toString(16) + ':' + d.productId.toString(16) +
+    ' serial=' + (d.serialNumber || '(none)') +
+    ' class=' + d.deviceClass + '/' + d.deviceSubclass + '/' + d.deviceProtocol +
+    ' usb=' + d.usbVersionMajor + '.' + d.usbVersionMinor + '.' + d.usbVersionSubminor +
+    ' opened=' + d.opened +
+    ' cfg=' + (cfg ? cfg.configurationValue : '(none)') + ' ifs=[' + ifs + ']', 'inf');
+}
+
+function discoverEndpoints(d) {
+  const ifaces = (d.configuration && d.configuration.interfaces) || [];
+  for (const iface of ifaces) {
+    for (const alt of (iface.alternates || [])) {
+      if (alt.interfaceClass !== 0xff) continue;
+      let outEp = null, inEp = null;
+      for (const ep of (alt.endpoints || [])) {
+        if (ep.direction === 'out' && outEp === null) outEp = ep.endpointNumber;
+        if (ep.direction === 'in' && inEp === null) inEp = ep.endpointNumber;
+      }
+      if (outEp !== null && inEp !== null)
+        return { iface: iface.interfaceNumber, outEp: outEp, inEp: inEp };
+    }
+  }
+  return null;
+}
+
+let keepAliveTimer = null;
+function stopKeepalive() {
+  if (keepAliveTimer !== null) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+}
+function startKeepalive() {
+  stopKeepalive();
+  keepAliveTimer = setInterval(async () => {
+    if (!device) { stopKeepalive(); return; }
+    try {
+      const r = await usbXfer(new Uint8Array([0xa7, 0x02, 0x00, 0x1f, 0x00]), 64);
+      checkResp(r, 0xa7);
+    } catch (e) {
+      stopKeepalive();
+      log('キープアライブ応答なし。通常起動に遷移した可能性。ISPモードで接続し直すこと。', 'err');
+    }
+  }, 1500);
+}
+
+$('paired').onclick = async () => {
+  try {
+    const devs = await navigator.usb.getDevices();
+    log('ペア済み ' + devs.length + ' 件', 'inf');
+    devs.forEach((d, i) => dumpDevice(d, '[' + i + ']'));
+    if (!devs.length) log('ペア済みなし。Connectダイアログの20件は列挙ゴーストの可能性。', 'inf');
+  } catch (e) { log('getDevices失敗: ' + e.message, 'err'); }
+};
+
+$('forgetall').onclick = async () => {
+  stopKeepalive();
+  try {
+    const devs = await navigator.usb.getDevices();
+    let n = 0;
+    for (const d of devs) { try { await d.forget(); n++; } catch (e) {} }
+    log('ペア消去 ' + n + ' 件。抜き差し後に Connect し直すこと。', 'ok');
+  } catch (e) { log('forgetall失敗: ' + e.message, 'err'); }
+};
+
+$('copyusb').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText('chrome://settings/content/usbDevices');
+    log('コピー成功。アドレスバーに貼り付けて開くこと。', 'ok');
+  } catch (e) { log('コピー失敗: ' + e.message, 'err'); }
+};
+
+$('copylog').onclick = async () => {
+  try {
+    const t = Array.from($('log').children).map(d => d.textContent).join('\n');
+    await navigator.clipboard.writeText(t);
+    dlog('ログをコピー', 'inf');
+  } catch (e) { log('コピー失敗: ' + e.message, 'err'); }
+};
+
+$('forget').onclick = async () => {
+  if (!device) return;
+  stopKeepalive();
+  try {
+    await device.forget();
+    log('forget成功。device=nullに戻す。', 'ok');
+  } catch (e) { log('forget失敗: ' + e.message, 'err'); }
+  device = null;
+  $('devinfo').textContent = '(切断)';
+  setPill(false);
+  $('forget').disabled = true;
+  $('flash').disabled = true;
+};
+
+const ISP_FILTERS = [
+  { vendorId: 0x4348, productId: 0x55e0 },
+  { vendorId: 0x1a86, productId: 0x55e0 },
+];
+function isIspDevice(d) {
+  return ISP_FILTERS.some(f => f.vendorId === d.vendorId && f.productId === d.productId);
+}
+
+$('connect').onclick = async () => {
+  try {
+    const paired = await navigator.usb.getDevices();
+    const live = paired.filter(isIspDevice);
+    let direct = false;
+    if (live.length === 1) {
+      device = live[0];
+      direct = true;
+      dlog('ペア済みデバイスに直接接続 (ピッカー省略)', 'ok');
+    } else {
+      if (live.length > 1) dlog('許可済み複数 (' + live.length + ' 件)。ピッカーで選択すること。', 'inf');
+      device = await navigator.usb.requestDevice({ filters: ISP_FILTERS });
+    }
+    dumpDevice(device, '選択');
+    $('forget').disabled = false;
+    try {
+      await device.open();
+    } catch (e) {
+      if (direct && (e.name === 'SecurityError' || e.name === 'NotFoundError')) {
+        log('保存済み許可では開けない (' + e.name + ')。ピッカーで選び直す。', 'err');
+        try {
+          device = await navigator.usb.requestDevice({ filters: ISP_FILTERS });
+        } catch (e2) {
+          log('再選択がキャンセルされた: ' + e2.message, 'err');
+          return;
+        }
+        dumpDevice(device, '再選択');
+        try {
+          await device.open();
+        } catch (e3) {
+          log('open失敗(再選択後): ' + e3.name + ': ' + e3.message, 'err');
+          dlog('切分: ①`ls -l /dev/bus/usb/005/0xx` が666か ②snap版Chromeなら `snap connect chromium:raw-usb` ' +
+            '③別タブ/wchispの掴み残し→全て閉じて抜き差し ④chrome://device-log の該当行', 'inf');
+          return;
+        }
+      } else {
+        log('open失敗: ' + e.name + ': ' + e.message, 'err');
+        dlog('切分: ①`ls -l /dev/bus/usb/005/0xx` が666か ②snap版Chromeなら `snap connect chromium:raw-usb` ' +
+          '③別タブ/wchispの掴み残し→全て閉じて抜き差し ④chrome://device-log の該当行', 'inf');
+        return;
+      }
+    }
+    if (device.configuration === null) await device.selectConfiguration(1);
+    const found = discoverEndpoints(device);
+    if (found) {
+      IFACE = found.iface; EP_OUT = found.outEp; EP_IN = found.inEp;
+      dlog('EP発見: iface=' + IFACE + ' OUT=' + EP_OUT + ' IN=' + EP_IN + ' (class 0xFF)', 'ok');
+    } else {
+      log('EP発見失敗。既定値 iface=0 OUT=2 IN=2 を使用', 'err');
+    }
+    await device.claimInterface(IFACE);
+    $('devinfo').textContent = '接続OK';
+    setPill(true);
+    $('connect').classList.add('done');
+    $('connect').textContent = '接続OK ✓';
+    $('flashnote').textContent = 'そのまま「書き込み開始」を押してください。';
+    setStatus('接続OK。そのまま書き込み開始を押してください。');
+    log('USB 接続・claim 成功', 'ok');
+    startKeepalive();
+    $('flash').disabled = !fwBytes;
+  } catch (e) {
+    log('接続失敗: ' + e.message, 'err');
+  }
+};
+
+$('flash').onclick = async () => {
+  if (!device || !fwBytes) return;
+  $('flash').disabled = true;
+  progress(0);
+  $('warn').classList.add('on'); 
+  let stage = '';
+  stopKeepalive(); 
+  try {
+    stage = 'A1識別';
+    setStatus('キーパッドを確認中…');
+    const magic = new TextEncoder().encode('MCU ISP & WCH.CN');
+    const a1 = new Uint8Array([0xa1, 0x12, 0x00, CH552.type, CH552.family, ...magic]);
+    let resp = await usbXfer(a1, 64);
+    checkResp(resp, 0xa1);
+    if (resp[4] === 0 && resp[5] === 0) throw new Error('chip is hosed (family/type=0)。リセット/電源再投入を。');
+    if (resp[5] !== CH552.family || resp[4] !== CH552.type)
+      throw new Error('CH552 ではない (family=0x' + resp[5].toString(16) + ' type=0x' + resp[4].toString(16) + ')。中断。');
+    dlog('A1 識別: CH552 確認', 'ok');
+
+    stage = 'A7版確認';
+    const a7 = new Uint8Array([0xa7, 0x02, 0x00, 0x1f, 0x00]);
+    resp = await usbXfer(a7, 64);
+    checkResp(resp, 0xa7);
+    const bv = ((resp[18] * 16777216) + (resp[19] << 16) + (resp[20] << 8) + resp[21]) >>> 0;
+    const bvStr = ((bv >> 16) & 0xff) + '.' + ((bv >> 8) & 0xff) + '.' + (bv & 0xff);
+    const chipId = resp.slice(22, 22 + CH552.idLen);
+    dlog('A7 bootloader=' + bvStr + ' ID=' + hex(chipId, 4), 'inf');
+    if (!SUPPORTED_BV.includes(bv)) throw new Error('未対応 bootloader ' + bvStr + '。中断。');
+    const waitRebootResp = bv >= 0x020500;
+
+    let s = 0;
+    for (const b of chipId) s = (s + b) & 0xff;
+    const key = new Uint8Array(8).fill(s);
+    key[7] = (key[7] + CH552.type) & 0xff;
+    const keySum = key.reduce((a, b) => (a + b) & 0xff, 0);
+
+    stage = 'A3鍵設定';
+    const a3 = new Uint8Array(3 + 30);
+    a3[0] = 0xa3; a3[1] = 0x1e; a3[2] = 0x00;
+    resp = await usbXfer(a3, 64);
+    const cksum = resp[4] | (resp[5] << 8);
+    if (resp[0] !== 0xa3 || cksum !== keySum)
+      throw new Error('A3 鍵拒否 (device=0x' + cksum.toString(16) + ' 期待=0x' + keySum.toString(16) + ')');
+    dlog('A3 鍵設定OK', 'ok');
+
+    const enc = new Uint8Array(fwBytes.length);
+    for (let i = 0; i < fwBytes.length; i++) enc[i] = fwBytes[i] ^ key[i % 8];
+
+    stage = 'A4消去';
+    setStatus('消去中…');
+    let eraseLen = Math.ceil(fwBytes.length / 1024);
+    if (eraseLen < 8) eraseLen = 8;
+    const a4 = new Uint8Array([0xa4, 0x04, 0x00, ...le16(eraseLen), 0x00, 0x00]);
+    resp = await usbXfer(a4, 64);
+    if (checkResp(resp, 0xa4) !== 0) throw new Error('A4 消去拒否');
+    dlog('A4 消去OK (' + eraseLen + 'KiB)', 'ok');
+
+    stage = 'A5書込';
+    setStatus('書き込み中…');
+    const total = enc.length;
+    for (let off = 0; off < total; off += 56) {
+      const chunk = enc.slice(off, off + 56);
+      const req = new Uint8Array(3 + 4 + 1 + chunk.length);
+      req[0] = 0xa5;
+      req.set(le16(chunk.length + 5), 1);
+      req.set(le32(off), 3);
+      req[7] = 0x00;
+      req.set(chunk, 8);
+      resp = await usbXfer(req, 64);
+      if (checkResp(resp, 0xa5) !== 0) throw new Error('A5 書込失敗 @' + off);
+      progress((off + chunk.length) / total * 0.8);
+    }
+    dlog('A5 書込OK (' + total + 'B)', 'ok');
+
+    stage = 'A6照合';
+    setStatus('ベリファイ中…');
+    for (let off = 0; off < total; off += 56) {
+      const chunk = enc.slice(off, off + 56);
+      const req = new Uint8Array(3 + 4 + 1 + chunk.length);
+      req[0] = 0xa6;
+      req.set(le16(chunk.length + 5), 1);
+      req.set(le32(off), 3);
+      req[7] = 0x00;
+      req.set(chunk, 8);
+      resp = await usbXfer(req, 64);
+      if (checkResp(resp, 0xa6) !== 0) throw new Error('A6 照合失敗 @' + off);
+      progress(0.8 + (off + chunk.length) / total * 0.15);
+    }
+    dlog('A6 ベリファイOK', 'ok');
+
+    stage = 'A2再起動';
+    setStatus('再起動中…');
+    const a2 = new Uint8Array([0xa2, 0x01, 0x00, 0x01]);
+    if (waitRebootResp) {
+      let rebootResp = null;
+      try {
+        rebootResp = await usbXfer(a2, 64);
+      } catch (e) {
+        dlog('A2 応答なし。再起動による切断の可能性(書込・ベリファイ済みのため継続): ' + e.message, 'inf');
+      }
+      if (rebootResp && checkResp(rebootResp, 0xa2) !== 0) throw new Error('A2 再起動拒否');
+      if (rebootResp) dlog('A2 再起動応答OK', 'ok');
+    } else {
+      try { await device.transferOut(EP_OUT, a2); } catch (e) {  }
+    }
+    progress(1);
+    setStatus('完了。キーパッドがキーボードとして認識されれば成功です。');
+    log('完了: 再起動コマンド送信。キーパッドがキーボード(1209:0001)として再列挙されれば成功。Vialでキー入力を確認すること。', 'ok');
+    try { await device.close(); } catch (e) {}
+    device = null;
+    $('devinfo').textContent = '(切断)';
+    setPill(false);
+  } catch (e) {
+    let hint = '';
+    if (stage === 'A1識別' || stage === 'A7版確認') hint = ' ISPモードで接続し直してください。';
+    log('失敗(' + (stage || '開始前') + '): ' + e.message + hint, 'err');
+  } finally {
+    $('warn').classList.remove('on');
+    $('flash').disabled = false;
+  }
+};
+
+loadManifest();
+
+navigator.usb.ondisconnect = (ev) => {
+  stopKeepalive();
+  if (device && ev.device === device) {
+    device = null;
+    $('devinfo').textContent = '(切断)';
+    setPill(false);
+    $('flash').disabled = true;
+    log('デバイス切断。ISPモードで接続し直してください。', 'err');
+  }
+};
+
+try {
+  const ok = ('usb' in navigator);
+  $('compat').textContent = ok ? '利用可能' : '未対応 — Chrome / Edge で開くこと';
+  if (!ok) setStatus('このブラウザはWebUSB未対応です。Chrome / Edge で開いてください。');
+} catch (e) { $('compat').textContent = '判定不可'; }
+</script>
+</body>
+</html>

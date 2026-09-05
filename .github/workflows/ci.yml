@@ -1,0 +1,37 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie-slim
+    steps:
+      - name: Install toolchain and utilities
+        run: |
+          set -eu
+          apt-get update
+          apt-get install -y --no-install-recommends sdcc python3 ca-certificates git
+          sdcc --version | head -n 1
+
+      - uses: actions/checkout@v5
+
+      - name: Build firmware
+        run: SDCC_HOME="" bash tools/build.sh
+
+      - name: Capture artifacts
+        if: always()
+        run: |
+          set -eu
+          mkdir -p /tmp/artifacts
+          cp -a build/* /tmp/artifacts/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: firmware
+          path: /tmp/artifacts
+          retention-days: 7

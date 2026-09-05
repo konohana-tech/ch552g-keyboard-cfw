@@ -1,0 +1,121 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie-slim
+    steps:
+      - name: Validate tag
+        run: |
+          set -eu
+          tag="${GITHUB_REF#refs/tags/}"
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'; then
+            echo "::error::Tag must be semver, e.g. v1.0.0"
+            exit 1
+          fi
+
+      - name: Install toolchain and utilities
+        run: |
+          set -eu
+          apt-get update
+          apt-get install -y --no-install-recommends sdcc python3 ca-certificates git
+          sdcc --version | head -n 1
+
+      - uses: actions/checkout@v5
+
+      - name: Build firmware
+        run: SDCC_HOME="" bash tools/build.sh
+
+      - name: Create dist
+        run: |
+          set -eu
+          tag="${GITHUB_REF#refs/tags/}"
+          mkdir -p dist/firmware
+          cp web-flasher/web-flasher.html dist/
+          printf '%s\n' '<!doctype html><meta charset=utf-8><meta http-equiv=refresh content="0;url=web-flasher.html"><link rel=canonical href="web-flasher.html"><title>redirect</title>' > dist/index.html
+          cp LICENSE dist/
+          cp build/ch552g-kbd.bin "dist/firmware/ch552g-kbd-${tag}.bin"
+          cp build/firmware.hex "dist/firmware/firmware-${tag}.hex"
+          cp firmware/manifest.json dist/firmware/
+          sha256sum "dist/firmware/ch552g-kbd-${tag}.bin" > dist/firmware/checksums.txt
+
+      - name: Update manifest (append release-only entry)
+        run: |
+          set -eu
+          tag="${GITHUB_REF#refs/tags/}"
+          bin="dist/firmware/ch552g-kbd-${tag}.bin"
+          python3 - "$bin" "dist/firmware/manifest.json" "$tag" <<'PY'
+          import hashlib, json, os, sys
+          bin_path, manifest_path, version = sys.argv[1], sys.argv[2], sys.argv[3]
+          data = open(bin_path, 'rb').read()
+          try:
+              m = json.load(open(manifest_path))
+          except (OSError, ValueError):
+              m = {"releases": []}
+          releases = m.get("releases", [])
+          releases = [r for r in releases if r.get("version") != "local-dev"]
+          releases.append({
+              "version": version,
+              "file": "firmware/" + os.path.basename(bin_path),
+              "size": len(data),
+              "sha256": hashlib.sha256(data).hexdigest(),
+          })
+          m["releases"] = releases
+          with open(manifest_path, 'w') as f:
+              f.write(json.dumps(m, separators=(',', ':')) + '\n')
+          PY
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-dist
+          path: dist/
+          retention-days: 14
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-dist
+          path: dist/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag="${GITHUB_REF#refs/tags/}"
+          ls -R dist
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes "Release $tag"
+          gh release upload "$tag" "dist/firmware/ch552g-kbd-${tag}.bin" "dist/firmware/firmware-${tag}.hex" --clobber
+          echo "https://github.com/${{ github.repository }}/releases/tag/${tag}"
+
+  deploy-pages:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

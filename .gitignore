@@ -1,0 +1,25 @@
+build/
+toolchain/
+*.deb
+*.rel
+*.ihx
+*.hex
+*.bin
+*.lk
+*.map
+*.mem
+*.lst
+*.rst
+*.sym
+*.asm
+*.adb
+# debug scripts (phase4 bring-up, not required for build)
+test_reload.py
+tools/check_after_vial_set.py
+tools/check_encoder.py
+tools/check_encoder2.py
+tools/check_lt_clock.py
+tools/check_row1.py
+tools/check_set_bhb.py
+tools/check_set_get.py
+tools/check_typing.py
