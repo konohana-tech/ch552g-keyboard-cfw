@@ -496,13 +496,21 @@ static uint8_t scan_keycode(uint8_t al, uint8_t k) __reentrant {
   dec_mod = 0;
   /* L0 layer-action keys (MO/TO/LT) are consumed as switches: their own
    * position never emits (QMK press-time binding; upper-layer shadowing of
-   * a base switch stays silent by design). >0x00FF filter covers the rest. */
+   * a base switch stays silent by design). Base MT silences only its tracked
+   * hold (level MT owns no slot and is re-scanned every poll); base QK_MODS
+   * needs no shadow (a held MODS key always owns a slot, so reaching scan
+   * means a fresh press -> resolve the live layer). >0x00FF filter covers
+   * the rest. */
   if (al) {
     uint16_t b0 = keymap[0][k];
     uint16_t g = (uint16_t)(b0 & QK_LAYER_MASK);
+    uint8_t b1 = (uint8_t)(b0 >> 8);
     if (g == QK_MO_BASE || g == QK_TO_BASE ||
         (b0 & QK_LT_MASK) == QK_LT_BASE ||
         td_is_td_key(b0))
+      return 0;
+    if ((b1 & 0xE0) == 0x20 && mt_packed != 0x07 &&
+        (uint8_t)(mt_packed & 0x07) == (uint8_t)(k & 0x07))
       return 0;
   }
   bkc = keymap[al][k];
