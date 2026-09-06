@@ -37,6 +37,10 @@ CFLAGS=(-mmcs51 --std=c99
         --no-xinit-opt
         --opt-code-size
         --code-size 14336)
+# Diet measurement hook (issue #5 FLASH diet): EXTRA_CFLAGS env appends
+# temporary optimizer flags without editing this file.
+# shellcheck disable=SC2206
+if [ -n "${EXTRA_CFLAGS:-}" ]; then CFLAGS+=($EXTRA_CFLAGS); fi
 
 SRCS=(main usb vial dataflash tap_dance rgb)
 RELS=()

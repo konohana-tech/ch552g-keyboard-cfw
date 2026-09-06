@@ -46,6 +46,18 @@ static uint8_t enc_override_timer;
  * position is NOT marked → resolves live layer binding (QMK-faithful).
  * XRAM __at only (IRAM spare none); 0x0171 free (dec_mod ends 0x0170). */
 __xdata __at (0x0171) uint8_t shadow_activ;
+/* issue #5 (QMK waiting_buffer / ZMK captured_events, lean port): last
+ * captured slot. A foreign press during undecided MT takes a normal slot
+ * but its REPORT is suppressed until decision (buffering without a queue).
+ * pd_s is the pressed-during flag (QMK waiting_buffer_typed /
+ * ZMK have_captured_keydown): B-first is never captured → stays tap.
+ * Single depth (latest key only). */
+__xdata __at (0x0172) uint8_t pd_s; /* captured slot, 0xFF = none */
+/* issue #5 derivative (trial 7): captured key still held at MT tap decision
+ * hides behind the tap override (report[2]) and vanishes if released inside
+ * the ~10-25ms window. Chain it after: pending keycode (0 = none), loaded
+ * into enc_override_* when the tap override expires. 0x0173 free. */
+__xdata __at (0x0173) uint8_t mt_pend;
 
 /* Layer state: NO free IRAM (0x1F = fx_phase) and XRAM <0x100 fully mapped
  * (XSEG auto-place lands in SIE-owned EP0_buffer 0x00-0x09 — gotcha #9:
@@ -81,7 +93,7 @@ __xdata __at (0x00FF) uint8_t lt_packed;
  * Poll (~2ms) << tick (65.5ms) so at most one overflow per poll. */
 __xdata __at (0x00FC) uint8_t lt_prev_tf0; /* reserved placeholder (unused) */
 __xdata __at (0x00FD) uint8_t tt_tick_cnt; /* reserved placeholder (unused) */
-static void tt_tick(void) __reentrant {
+static void tt_tick(void) {
   if (TF0) {
     TF0 = 0;
     tt_now++;
@@ -96,7 +108,7 @@ static void tt_tick(void) __reentrant {
  * k = matrix index, bl = LT layer (<4), tk = tap keycode. Single tracker
  * (shared nothing with TT); holds >16s misfire as tap on release (8-bit
  * wrap, documented, negligible). */
-static void lt_edge(uint8_t k, uint8_t press, uint8_t bl, uint8_t tk) __reentrant {
+static void lt_edge(uint8_t k, uint8_t press, uint8_t bl, uint8_t tk) {
   uint8_t pk = lt_packed;
   if (bl >= VIAL_LAYERS) return;
   if (press) {
@@ -135,10 +147,11 @@ __xdata __at (0x0170) uint8_t dec_mod;
  * same byte layout as the macro EXT path). Right-hand press is ignored here
  * (stays silent). k = matrix index. Overlapping MT presses retrack (same
  * class of limitation as LT's single tracker, documented). */
-static void mt_edge(uint8_t k, uint8_t press, uint8_t mb, uint8_t tk) __reentrant {
+static void mt_edge(uint8_t k, uint8_t press, uint8_t mb, uint8_t tk) {
   uint8_t pk = mt_packed;
   if (press) {
     if (mb & 0x10) return; /* right-hand MT unsupported */
+    pd_s = 0xFF; /* new episode lifts old suppression */
     mt_stamp = tt_now;
     mt_packed = (uint8_t)(k & 0x07);
     mt_mod = (uint8_t)(mb & 0x0F); /* left mods ARE the HID mod byte */
@@ -148,6 +161,8 @@ static void mt_edge(uint8_t k, uint8_t press, uint8_t mb, uint8_t tk) __reentran
     if (!(pk & 0x80) && mt_tk && (uint8_t)(tt_now - mt_stamp) <= LT_TERM_TICKS) {
       enc_override_keycode = mt_tk;
       enc_override_timer = LT_TAP_POLLS;
+      /* chained tap (issue #5 derivative): mt_pend (stashed at capture,
+       * cleared by hold paths) emits after this override expires. */
     }
     mt_packed = 0x07;
   }
@@ -156,7 +171,7 @@ static void mt_edge(uint8_t k, uint8_t press, uint8_t mb, uint8_t tk) __reentran
 /* MT hold level: call every poll, OR the result into report[0]. Past the
  * shared tap term (== LT term, same tt_now timebase) with the key still held
  * the press-time mod bits are emitted. Else 0. */
-static uint8_t mt_hold_mod(void) __reentrant {
+static uint8_t mt_hold_mod(void) {
   uint8_t pk = mt_packed;
   uint8_t k, bi;
   if (pk == 0x07) return 0; /* idle */
@@ -165,6 +180,7 @@ static uint8_t mt_hold_mod(void) __reentrant {
   if (key_debounced & (uint8_t)(1u << bi)) { mt_packed = 0x07; return 0; }
   if ((uint8_t)(tt_now - mt_stamp) > LT_TERM_TICKS) {
     mt_packed = (uint8_t)(k | 0x80);
+    mt_pend = 0; /* term-hold: B rides level path live; no chain */
     return mt_mod;
   }
   return (pk & 0x80) ? mt_mod : 0;
@@ -202,7 +218,7 @@ __xdata __at (0x015B) uint8_t ms_buttons; /* mouse buttons held via enc-sw (bit2
 #define MACRO_GAP_POLLS 60
 
 /* (Re)start macro id (0-2). Clears holds/tap: retrigger restarts cleanly. */
-static void mc_start(uint8_t id) __reentrant {
+static void mc_start(uint8_t id) {
   uint8_t p = 0, n = id;
   mc_hk0 = 0; mc_hm0 = 0; mc_hk1 = 0; mc_hm1 = 0; mc_hk2 = 0; mc_hm2 = 0;
   mc_kc = 0; mc_mod = 0; mc_phase = 0; mc_gap = 0;
@@ -228,7 +244,7 @@ __code const uint8_t mc_punct[65] = {
 
 /* ASCII -> HID usage (alnum computed; punct via table).
  * *mp = 0x02 if left-shift needed, else 0. Returns 0 if unmappable. */
-static uint8_t mc_ascii(uint8_t c, uint8_t *mp) __reentrant {
+static uint8_t mc_ascii(uint8_t c, uint8_t *mp) {
   *mp = 0;
   if (c >= 'a' && c <= 'z') return (uint8_t)(0x04 + (c - 'a'));
   if (c >= 'A' && c <= 'Z') { *mp = 0x02; return (uint8_t)(0x04 + (c - 'A')); }
@@ -245,7 +261,7 @@ static uint8_t mc_ascii(uint8_t c, uint8_t *mp) __reentrant {
 
 /* Place a decoded (key, mod) by op: 1=tap momentary, 2=hold, else release.
  * Hold slots depth 3. */
-static void mc_apply(uint8_t key, uint8_t mod, uint8_t op) __reentrant {
+static void mc_apply(uint8_t key, uint8_t mod, uint8_t op) {
   if (op == 1) {
     mc_kc = key; mc_mod = mod; mc_phase = 1; mc_gap = MACRO_HOLD_POLLS;
   } else if (op == 2) {
@@ -264,7 +280,7 @@ static void mc_apply(uint8_t key, uint8_t mod, uint8_t op) __reentrant {
 }
 
 /* HID usage byte -> mod bit (0) or key part. Modifiers are 0xE0-0xE7. */
-static void mc_emit(uint8_t kc, uint8_t down) __reentrant {
+static void mc_emit(uint8_t kc, uint8_t down) {
   uint8_t mod = 0, key = kc;
   if (kc >= 0xE0 && kc <= 0xE7) { mod = (uint8_t)(1u << (kc - 0xE0)); key = 0; }
   mc_apply(key, mod, down);
@@ -276,7 +292,7 @@ static void mc_emit(uint8_t kc, uint8_t down) __reentrant {
  * 0x01 op args (1=tap,2=down,3=up +1 kc byte; 4=delay +2 bytes;
  * 5/6/7 EXT 16-bit QK_MODS, LE wire + decode_keycode);
  * other bytes = literal text (mc_ascii + punct table). */
-static void macro_poll(void) __reentrant {
+static void macro_poll(void) {
   uint8_t b;
   if (!mc_play) return;
   if (mc_gap) { mc_gap--; return; }
@@ -355,7 +371,7 @@ static void macro_poll(void) __reentrant {
  * as scan_keycode (active layer, TRNS->base), so upper-layer shadowing works
  * QMK-faithful. TO(n) clears all latch bits then sets n
  * (TO(0) = back to base). Latch is RAM-only. */
-static void debounce_update(void) __reentrant {
+static void debounce_update(void) {
   uint8_t raw = 0;
   uint8_t p1 = P1, p3 = P3;
   uint8_t i;
@@ -375,6 +391,21 @@ static void debounce_update(void) __reentrant {
         uint8_t press = (raw & mask) ? 0 : 1;
         key_debounced ^= mask;
         debounce_cnt[i] &= 0x80;
+        /* issue #5: only the last-captured key (pressed during this hold)
+         * forces hold on release. B-first was never captured → stays tap.
+         * The replay uses the shared override window. */
+        if (!press && pd_s < 6 &&
+            mt_packed != 0x07 && !(mt_packed & 0x80)) {
+          uint8_t mk = (uint8_t)(mt_packed & 0x07);
+          uint8_t mi = (mk < 3) ? mk : (uint8_t)(mk - 1);
+          if (slot_pos[pd_s] == ((i < 3) ? i : (uint8_t)(i + 1)) &&
+              !(key_debounced & (uint8_t)(1u << mi))) {
+            mt_packed |= 0x80;
+            enc_override_keycode = slot_kc[pd_s];
+            enc_override_timer = LT_TAP_POLLS;
+            pd_s = 0xFF; mt_pend = 0; /* hold emits B live; no chain */
+          }
+        }
         { /* layer-action edge. PRESS sees pre-press AL (correct press-time
            * binding). RELEASE sees stale-held AL (resolve hasn't reacted to
            * this release yet), so LT prefers the effective binding
@@ -454,11 +485,11 @@ static void debounce_update(void) __reentrant {
 /* Layer helpers (MO/TO/LT): split from main's poll loop (overlay-frugal,
  * gotcha #39). resolve reads P3 directly so it takes no params;
  * scan returns the emittable byte (0 = nothing) with TRNS->base inside. */
-/* NOTE: __reentrant (stack frames, NOT overlay): IRAM overlay pool is full
- * (11B, fragmented by absolute placements) so plain helpers overflow OSEG
- * at link. Stack (SSEG from 0x7F, ~129B free) has ample room. Called only
- * from main's poll loop; ISR never calls them. */
-static uint8_t layer_resolve(void) __reentrant {
+/* NOTE: plain (overlay) helpers: main-loop-only call graph links cleanly
+ * (diet 2026-09: __reentrant removed from main.c statics, -638B; ISR only
+ * reaches usb.c/vial.c so overlay sharing is link-time safe).
+ * vial.c helpers stay __reentrant (ISR context). */
+static uint8_t layer_resolve(void) {
   uint8_t al = 0;
   uint8_t j;
   uint16_t bkc;
@@ -508,12 +539,12 @@ static uint8_t layer_resolve(void) __reentrant {
  * consumer interface, so translate to keyboard-page equivalents
  * (KB_MUTE 0x7F / KB_VOL_UP 0x80 / KB_VOL_DOWN 0x81). All other consumer /
  * system / mouse codes have no keyboard equivalent and stay unsupported. */
-static uint8_t kb_compat(uint8_t kc) __reentrant {
+static uint8_t kb_compat(uint8_t kc) {
   if(kc>=0xA8 && kc<=0xAA) return (uint8_t)(0x7F + (kc - 0xA8));
   return kc;
 }
 
-static uint8_t scan_keycode(uint8_t al, uint8_t k) __reentrant {
+static uint8_t scan_keycode(uint8_t al, uint8_t k) {
   uint16_t bkc;
   dec_mod = 0;
   /* Layer-action shadow (issue #2, shadow_activ bitmap): a position whose
@@ -595,12 +626,14 @@ void main(void) {
 
   enc_override_keycode = 0;
   enc_override_timer = 0;
+  mt_pend = 0; /* issue #5 chained-tap idle */
   shadow_activ = 0; /* no layer activators at boot (issue #2) */
   key_debounced = 0x3F;
   for(i=0;i<6;i++) debounce_cnt[i]=0;
   tt_now = 0; lt_prev_tf0 = 0; /* timebase idle; 0xFC-0xFD reserved placeholders */
   lt_stamp = 0; lt_packed = 0x07; /* LT tracker idle */
   mt_stamp = 0; mt_packed = 0x07; mt_mod = 0; mt_tk = 0; dec_mod = 0; /* MT/MODS idle */
+  pd_s = 0xFF; /* issue #5 capture idle */
   mc_play = 0; mc_pos = 0; mc_gap = 0; mc_phase = 0; /* macro player idle */
   ms_wheel_rel = 0; /* mouse wheel idle */
   ms_buttons = 0; /* mouse buttons released */
@@ -633,7 +666,7 @@ void main(void) {
     }
 
     tt_tick(); /* 65.5ms timebase (TF0 edge, read-only) */
-    debounce_update(); /* debounce + TO/LT/MT/TD edges (reentrant) */
+    debounce_update(); /* debounce + TO/LT/MT/TD edges */
 
     /* Layer resolve + press-time emit. Held slots keep their press-time
      * keycode across layer changes (single input per press); fresh presses
@@ -647,6 +680,7 @@ void main(void) {
         if (k == 0xFF) { report[2+s] = 0; continue; }
         uint8_t bi = (k < 3) ? k : (uint8_t)(k - 1);
         if (key_debounced & (uint8_t)(1u << bi)) { slot_pos[s] = 0xFF; slot_kc[s] = 0; slot_mod[s] = 0; report[2+s] = 0; }
+        else if (pd_s == s && mt_packed != 0x07 && !(mt_packed & 0x80)) report[2+s] = 0;
         else { report[2+s] = slot_kc[s]; report[0] |= slot_mod[s]; }
       }
       for (i = 0; i < 6; i++) {
@@ -657,13 +691,18 @@ void main(void) {
         if (s < 6) continue;
         kc = scan_keycode(AL_GET(), k);
         if (!kc && !dec_mod) continue;
-        /* HOLD_ON_OTHER_KEY_PRESS (issue #1): a fresh matrix press forces a
-         * pending (undecided) MT straight to hold, so the chord leaves in
-         * one report with the mod set. MT keys never reach here (scan gives
-         * 0/0 -> continue); they retrack in mt_edge instead. Enc-sw has no
-         * edge infra so it does not force (documented exception). */
-        if (mt_packed != 0x07) mt_packed |= 0x80;
-        for (s = 0; s < 6; s++) if (slot_pos[s] == 0xFF) { slot_pos[s] = k; slot_kc[s] = kc; slot_mod[s] = dec_mod; report[2+s] = kc; report[0] |= dec_mod; break; }
+        /* issue #5: a press during undecided MT takes its slot masked
+         * (report held back until decision; QMK waiting_buffer), plus a
+         * chained-tap stash (mt_pend=kc: if MT releases first, B emits
+         * after the tap override so a fast tap can't vanish inside its
+         * window — trial 7 fix). Cleared by hold paths below.
+         * B-first (MT idle here) is never masked. MT keys (0/0) skip. */
+        for (s = 0; s < 6; s++) if (slot_pos[s] == 0xFF) {
+          slot_pos[s] = k; slot_kc[s] = kc; slot_mod[s] = dec_mod;
+          if (mt_packed != 0x07 && !(mt_packed & 0x80)) { pd_s = s; mt_pend = kc; }
+          else { report[2+s] = kc; report[0] |= dec_mod; }
+          break;
+        }
       }
       report[0] |= mt_hold_mod(); /* MT hold level (issue #1; 0 unless holding past term) */
       if (!(p3 & ENC_SW_PIN)) {
@@ -710,7 +749,7 @@ void main(void) {
     changed=0; for(i=0;i<8;i++) if(report[i]!=prev_report[i]){changed=1;break;}
     if(changed){for(i=0;i<8;i++) prev_report[i]=report[i]; usb_send_report(report);}
 
-    if(enc_override_timer){enc_override_timer--; if(enc_override_timer==0) enc_override_keycode=0;}
+    if(enc_override_timer){enc_override_timer--; if(enc_override_timer==0){ if(mt_pend){enc_override_keycode=mt_pend; enc_override_timer=LT_TAP_POLLS; mt_pend=0;} else enc_override_keycode=0;}}
     if(ms_wheel_rel){ ms_wheel_rel--; if(ms_wheel_rel==0) usb_send_mouse(0,0,ms_buttons,(int8_t)0); }
 
     {
