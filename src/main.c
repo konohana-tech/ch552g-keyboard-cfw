@@ -623,6 +623,12 @@ void main(void) {
         if (s < 6) continue;
         kc = scan_keycode(AL_GET(), k);
         if (!kc && !dec_mod) continue;
+        /* HOLD_ON_OTHER_KEY_PRESS (issue #1): a fresh matrix press forces a
+         * pending (undecided) MT straight to hold, so the chord leaves in
+         * one report with the mod set. MT keys never reach here (scan gives
+         * 0/0 -> continue); they retrack in mt_edge instead. Enc-sw has no
+         * edge infra so it does not force (documented exception). */
+        if (mt_packed != 0x07) mt_packed |= 0x80;
         for (s = 0; s < 6; s++) if (slot_pos[s] == 0xFF) { slot_pos[s] = k; slot_kc[s] = kc; slot_mod[s] = dec_mod; report[2+s] = kc; report[0] |= dec_mod; break; }
       }
       report[0] |= mt_hold_mod(); /* MT hold level (issue #1; 0 unless holding past term) */
