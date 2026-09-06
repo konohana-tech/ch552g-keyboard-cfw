@@ -32,7 +32,7 @@ void USB_ISR(void) __interrupt(INT_NO_USB) { USBInterrupt(); }
 #define QK_MT_BASE 0x2000
 #define QK_MT_MASK 0xE000
 #define QK_LAYER_MASK 0xFFE0
-/* LT tap window ~=196ms (3x65.5ms Timer0; QMK 200ms, ex-TT_TERM_TICKS). */
+/* LT tap window ~=196ms (3x65.5ms Timer0; QMK default 200ms). */
 #define LT_TERM_TICKS 3
 #define KC_TRNS 0x0001
 
@@ -55,12 +55,12 @@ static uint8_t debounce_cnt[6];
 
 /* Layer-tap timebase: 1B xdata @0xFB (build.sh guard-allowlisted with
  * fx_base; SIE/DMA never touch >=0xFB). tt_now: free-running 65.5ms ticks
- * (tt_tick owns TF0 clear-on-read). Ex-TT tracker (tt_stamp/tt_packed @0xFC-0xFD)
- * freed by TT abolition. LT tap state stays @0xFE-0xFF. */
+ * (tt_tick owns TF0 clear-on-read). Reserved slots @0xFC-0xFD (unused
+ * placeholders). LT tap state stays @0xFE-0xFF. */
 __xdata __at (0x00FB) uint8_t tt_now;
 
 /* LT tap state: 2B xdata @0xFE-0xFF (guard-allowlisted lt_*; same window
- * discipline as TT). lt_stamp: press tick of in-progress LT tap.
+ * discipline). lt_stamp: press tick of in-progress LT tap.
  * lt_packed: key[2:0] (7=none). Tap release injects via enc_override_*
  * (shared with encoder; rare overlap documented). RAM-only. */
 __xdata __at (0x00FE) uint8_t lt_stamp;
@@ -71,8 +71,8 @@ __xdata __at (0x00FF) uint8_t lt_packed;
 
 /* Layer-tap timebase: tt_tick OWNS TF0 (clear-on-read every poll).
  * Poll (~2ms) << tick (65.5ms) so at most one overflow per poll. */
-__xdata __at (0x00FC) uint8_t lt_prev_tf0; /* reserved (edge detect removed) */
-__xdata __at (0x00FD) uint8_t tt_tick_cnt; /* reserved (was tt_now debug counter, now unwritten) */
+__xdata __at (0x00FC) uint8_t lt_prev_tf0; /* reserved placeholder (unused) */
+__xdata __at (0x00FD) uint8_t tt_tick_cnt; /* reserved placeholder (unused) */
 static void tt_tick(void) __reentrant {
   if (TF0) {
     TF0 = 0;
@@ -369,7 +369,7 @@ static void debounce_update(void) __reentrant {
         debounce_cnt[i] &= 0x80;
         { /* layer-action edge. PRESS sees pre-press AL (correct press-time
            * binding). RELEASE sees stale-held AL (resolve hasn't reacted to
-           * this release yet), so TT/LT prefer the effective binding
+           * this release yet), so LT prefers the effective binding
            * (shadow press) with L0 fallback (base press). TO fires on
            * PRESS only. */
           uint8_t k = (i < 3) ? i : (uint8_t)(i + 1);
@@ -570,7 +570,7 @@ void main(void) {
   enc_override_timer = 0;
   key_debounced = 0x3F;
   for(i=0;i<6;i++) debounce_cnt[i]=0;
-  tt_now = 0; lt_prev_tf0 = 0; /* timebase idle (ex-TT trackers freed) */
+  tt_now = 0; lt_prev_tf0 = 0; /* timebase idle; 0xFC-0xFD reserved placeholders */
   lt_stamp = 0; lt_packed = 0x07; /* LT tracker idle */
   mt_stamp = 0; mt_packed = 0x07; mt_mod = 0; mt_tk = 0; dec_mod = 0; /* MT/MODS idle */
   mc_play = 0; mc_pos = 0; mc_gap = 0; mc_phase = 0; /* macro player idle */
@@ -604,8 +604,8 @@ void main(void) {
       }
     }
 
-    tt_tick(); /* TT timebase (TF0 edge, read-only) */
-    debounce_update(); /* debounce + TO toggle + TT edges (reentrant) */
+    tt_tick(); /* 65.5ms timebase (TF0 edge, read-only) */
+    debounce_update(); /* debounce + TO/LT/MT/TD edges (reentrant) */
 
     /* Layer resolve + press-time emit. Held slots keep their press-time
      * keycode across layer changes (single input per press); fresh presses

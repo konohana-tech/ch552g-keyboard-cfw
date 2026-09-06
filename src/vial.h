@@ -79,7 +79,7 @@ extern __xdata __at (VIAL_ENCODER_MAP_ADDR) uint16_t encoder_map[VIAL_LAYERS][2]
 extern __xdata __at (MACRO_POOL_XRAM) uint8_t macro_pool[MACRO_POOL_LEN];
 
 /* QMK macro keycodes (quantum/keycodes.h, verified): QK_MACRO 0x7700-0x777F.
- * Slots used: 0x7700 (M0), 0x7701 (M1). */
+ * Slots used: 0x7700 (M0), 0x7701 (M1), 0x7702 (M2). */
 #define QK_MACRO_BASE 0x7700
 #define QK_MACRO_MASK 0xFF80
 

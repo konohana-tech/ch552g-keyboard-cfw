@@ -17,8 +17,8 @@ __xdata __at (0x0098) uint16_t keymap[VIAL_LAYERS][NUM_KEYS];
 /* Encoder: layer x {0=CW,1=CCW} -> keycode. Placed after keymap (0x0098 + 48 = 0x00D8). */
 __xdata __at (0x00D8) uint16_t encoder_map[VIAL_LAYERS][2];
 
-/* Macro pool: 2 NUL-separated slots, 36B at XRAM 0x0100 (RAM mirror;
- * DataFlash 89..124 holds the persistent copy). Zero = empty macros. */
+/* Macro pool: 3 NUL-separated slots, 36B at XRAM 0x0100 (RAM mirror;
+ * DataFlash 89..104 holds 16B persistent copy). Zero = empty macros. */
 __xdata __at (MACRO_POOL_XRAM) uint8_t macro_pool[MACRO_POOL_LEN];
 
 __data uint8_t vial_unlocked;

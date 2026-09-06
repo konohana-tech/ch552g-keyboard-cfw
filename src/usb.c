@@ -83,7 +83,7 @@ __code uint8_t HIDReportDesc[] = {
 };
 
 // RAW HID Report Descriptor (Vial) — 25 bytes (NO Report ID; NO padding)
-// Usage Page 0xFF60 (Vendor Defined), 64-byte Input + 64-byte Output.
+// Usage Page 0xFF60 (Vendor Defined), 32-byte Input + 32-byte Output.
 // NOTE: do NOT define a Report ID (0x85). Linux HID rejects report_id 0 as invalid
 // ("report_id 0 is invalid" -> device fails to bind as hidraw). Vial desktop/libhidapi
 // and WebHID send the 32-byte command directly (optionally with a leading 0x00 byte that
