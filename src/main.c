@@ -43,8 +43,9 @@ static uint8_t enc_override_timer;
  * activators" — pressed when AL==0, causing the layer to activate.
  * scan_keycode shadows activator positions to prevent self-emission.
  * When another key already holds the layer (AL>0 at press time), the
- * position is NOT marked → resolves live layer binding (QMK-faithful). */
-static uint8_t shadow_activ;
+ * position is NOT marked → resolves live layer binding (QMK-faithful).
+ * XRAM __at only (IRAM spare none); 0x0171 free (dec_mod ends 0x0170). */
+__xdata __at (0x0171) uint8_t shadow_activ;
 
 /* Layer state: NO free IRAM (0x1F = fx_phase) and XRAM <0x100 fully mapped
  * (XSEG auto-place lands in SIE-owned EP0_buffer 0x00-0x09 — gotcha #9:
