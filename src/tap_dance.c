@@ -1,5 +1,5 @@
 /* tap_dance.c - lean 2 entries: single tap/hold, double tap, tap-hold; 200ms fixed.
- * Hold supports basic keys (report[2]) and layer keys MO/TG/TO/LT
+ * Hold supports basic keys (report[2]) and layer keys MO/TO/LT
  * (momentary layer while held, level semantics). Modifiers/complex out of scope.
  * 3+ taps are capped to double. Second tap must land before first tap fires. */
 #include "tap_dance.h"
@@ -57,7 +57,7 @@ void td_task(void){
             uint16_t kc=(td_count>=2 && e->on_tap_hold) ? e->on_tap_hold : e->on_hold;
             if(!kc) kc=e->on_tap;
             uint8_t hi=(uint8_t)(kc>>8), lo=(uint8_t)kc, nl=0;
-            if(hi==0x52) nl=lo&0x1F; /* MO/TG/TO family */
+            if(hi==0x52) nl=lo&0x1F; /* MO/TO family */
             else if((hi&0xF0)==0x40) nl=hi&0x0F; /* LT(layer,kc) */
             if(nl && nl<VIAL_LAYERS){ td_hold_layer=nl; return; }
             if(kc && kc<=0xFF) td_hold=(uint8_t)kc;
