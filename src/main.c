@@ -99,6 +99,13 @@ static void lt_edge(uint8_t k, uint8_t press, uint8_t bl, uint8_t tk) __reentran
   }
 }
 
+/* QK_MODS press-time mod slots: parallel to slot_kc, ORed into report[0]
+ * while held. 0x016A-0x016F free (UID ends 0x0167). */
+__xdata __at (0x016A) uint8_t slot_mod[6];
+/* scan_keycode side-channel: HID mod bits of the just-decoded QK_MODS key
+ * (0 when the key carries no modifier). Read immediately by the caller. */
+__xdata __at (0x0170) uint8_t dec_mod;
+
 /* Macro player state: XRAM 0x0124+ (pool is 0x0100-0x0123; SIE/DMA only
  * touch <0x0100; IRAM/overlay are full so nothing new lives there).
  * play: 0=idle, else id+1. pos: pool offset. gap: polls to wait.
@@ -425,6 +432,7 @@ static uint8_t kb_compat(uint8_t kc) __reentrant {
 
 static uint8_t scan_keycode(uint8_t al, uint8_t k) __reentrant {
   uint16_t bkc;
+  dec_mod = 0;
   /* L0 layer-action keys (MO/TO/LT) are consumed as switches: their own
    * position never emits (QMK press-time binding; upper-layer shadowing of
    * a base switch stays silent by design). >0x00FF filter covers the rest. */
@@ -438,8 +446,18 @@ static uint8_t scan_keycode(uint8_t al, uint8_t k) __reentrant {
   }
   bkc = keymap[al][k];
   if (bkc == KC_TRNS) bkc = keymap[0][k]; /* TRNS -> base */
-  if (bkc == 0 || bkc > 0x00FF) return 0; /* NO / action / TD (0x5700+) */
-  return kb_compat((uint8_t)bkc);
+  if (bkc == 0) return 0; /* NO */
+  if (bkc <= 0x00FF) return kb_compat((uint8_t)bkc);
+  { /* QK_MODS left (0x0100-0x0FFF): the high-byte low nibble IS the HID mod
+     * byte (same mapping as the macro EXT path); right-hand (0x10) stays
+     * unsupported. Tap part rides the press-time slots via dec_mod. */
+    uint8_t b1 = (uint8_t)(bkc >> 8);
+    if (b1 >= 0x01 && b1 <= 0x1F && !(b1 & 0x10)) {
+      dec_mod = (uint8_t)(b1 & 0x0F);
+      return kb_compat((uint8_t)(bkc & 0xFF));
+    }
+  }
+  return 0; /* action / TD (0x5700+) / macro (0x7700+) */
 }
 
 void main(void) {
@@ -487,12 +505,13 @@ void main(void) {
   for(i=0;i<6;i++) debounce_cnt[i]=0;
   tt_now = 0; lt_prev_tf0 = 0; /* timebase idle (ex-TT trackers freed) */
   lt_stamp = 0; lt_packed = 0x07; /* LT tracker idle */
+  dec_mod = 0; /* MODS side-channel idle */
   mc_play = 0; mc_pos = 0; mc_gap = 0; mc_phase = 0; /* macro player idle */
   ms_wheel_rel = 0; /* mouse wheel idle */
   ms_buttons = 0; /* mouse buttons released */
   mc_kc = 0; mc_mod = 0; mc_dlast = tt_now; mc_dtick = 0;
   mc_hk0 = 0; mc_hm0 = 0; mc_hk1 = 0; mc_hm1 = 0; mc_hk2 = 0; mc_hm2 = 0;
-  for (i = 0; i < 6; i++) { slot_pos[i] = 0xFF; slot_kc[i] = 0; } /* press-time slots idle */
+  for (i = 0; i < 6; i++) { slot_pos[i] = 0xFF; slot_kc[i] = 0; slot_mod[i] = 0; } /* press-time slots idle */
 
   rgb_set_defaults(); /* overwritten by DataFlash LED region if valid */
   vial_init();
@@ -532,8 +551,8 @@ void main(void) {
         uint8_t k = slot_pos[s];
         if (k == 0xFF) { report[2+s] = 0; continue; }
         uint8_t bi = (k < 3) ? k : (uint8_t)(k - 1);
-        if (key_debounced & (uint8_t)(1u << bi)) { slot_pos[s] = 0xFF; slot_kc[s] = 0; report[2+s] = 0; }
-        else report[2+s] = slot_kc[s];
+        if (key_debounced & (uint8_t)(1u << bi)) { slot_pos[s] = 0xFF; slot_kc[s] = 0; slot_mod[s] = 0; report[2+s] = 0; }
+        else { report[2+s] = slot_kc[s]; report[0] |= slot_mod[s]; }
       }
       for (i = 0; i < 6; i++) {
         uint8_t k;
@@ -542,8 +561,8 @@ void main(void) {
         for (s = 0; s < 6; s++) if (slot_pos[s] == k) break;
         if (s < 6) continue;
         kc = scan_keycode(AL_GET(), k);
-        if (!kc) continue;
-        for (s = 0; s < 6; s++) if (slot_pos[s] == 0xFF) { slot_pos[s] = k; slot_kc[s] = kc; report[2+s] = kc; break; }
+        if (!kc && !dec_mod) continue;
+        for (s = 0; s < 6; s++) if (slot_pos[s] == 0xFF) { slot_pos[s] = k; slot_kc[s] = kc; slot_mod[s] = dec_mod; report[2+s] = kc; break; }
       }
       if (!(p3 & ENC_SW_PIN)) {
         uint16_t swb = keymap[AL_GET()][7];
@@ -555,6 +574,7 @@ void main(void) {
           if (want != ms_buttons) { ms_buttons = want; usb_send_mouse(0, 0, want, (int8_t)0); }
         } else {
           kc = scan_keycode(AL_GET(), 7);
+          if (dec_mod) report[0] |= dec_mod; /* enc-sw QK_MODS level (MT silent here: no edge infra) */
           if (kc) { for (i = 2; i < 8; i++) if (report[i] == 0) { report[i] = kc; break; } }
           if (ms_buttons) { ms_buttons = 0; usb_send_mouse(0, 0, 0, (int8_t)0); }
         }
