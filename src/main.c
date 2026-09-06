@@ -39,6 +39,14 @@ void USB_ISR(void) __interrupt(INT_NO_USB) { USBInterrupt(); }
 static uint8_t enc_override_keycode;
 static uint8_t enc_override_timer;
 
+/* Layer-action shadow bitmap (issue #2): tracks which keys are "layer
+ * activators" — pressed when AL==0, causing the layer to activate.
+ * scan_keycode shadows activator positions to prevent self-emission.
+ * When another key already holds the layer (AL>0 at press time), the
+ * position is NOT marked → resolves live layer binding (QMK-faithful).
+ * XRAM __at only (IRAM spare none); 0x0171 free (dec_mod ends 0x0170). */
+__xdata __at (0x0171) uint8_t shadow_activ;
+
 /* Layer state: NO free IRAM (0x1F = fx_phase) and XRAM <0x100 fully mapped
  * (XSEG auto-place lands in SIE-owned EP0_buffer 0x00-0x09 — gotcha #9:
  * build 5c35a229 bricked keys+Vial this way). active (0-3) lives in
@@ -376,6 +384,22 @@ static void debounce_update(void) __reentrant {
           uint8_t alx = AL_GET();
           uint16_t bkc = alx ? keymap[alx][k] : keymap[0][k];
           if (bkc == KC_TRNS) bkc = keymap[0][k];
+          /* Shadow activator tracking (issue #2): when a MO/TO/LT key
+           * presses and the layer was NOT active before (alx==0), mark it
+           * as a layer activator. scan_keycode shadows these positions.
+           * When AL>0 at press time, the key is a fresh press → not marked
+           * → resolves live layer binding. */
+          {
+            uint16_t b0 = keymap[0][k];
+            uint16_t g0 = (uint16_t)(b0 & QK_LAYER_MASK);
+            if (press && alx == 0 &&
+                (g0 == QK_MO_BASE || g0 == QK_TO_BASE ||
+                 (b0 & QK_LT_MASK) == QK_LT_BASE)) {
+              shadow_activ |= (uint8_t)(1u << k);
+            } else if (!press) {
+              shadow_activ &= (uint8_t)~(1u << k);
+            }
+          }
           /* TO(n) is press-only: gate the branch on press so a RELEASE seen
            * through a TO binding (e.g. LT on L0, TO on L1: release resolves
            * with the stale-held layer) falls through to the L0 fallback
@@ -492,20 +516,23 @@ static uint8_t kb_compat(uint8_t kc) __reentrant {
 static uint8_t scan_keycode(uint8_t al, uint8_t k) __reentrant {
   uint16_t bkc;
   dec_mod = 0;
-  /* L0 layer-action keys (MO/TO/LT) are consumed as switches: their own
-   * position never emits (QMK press-time binding; upper-layer shadowing of
-   * a base switch stays silent by design). Base MT silences only its tracked
-   * hold (level MT owns no slot and is re-scanned every poll); base QK_MODS
-   * needs no shadow (a held MODS key always owns a slot, so reaching scan
-   * means a fresh press -> resolve the live layer). >0x00FF filter covers
-   * the rest. */
+  /* Layer-action shadow (issue #2, shadow_activ bitmap): a position whose
+   * base key is MO/TO/LT stays silent while it is the layer activator
+   * (pressed when AL==0 and holding the layer). A position pressed after
+   * another key already activated the layer is NOT in the bitmap, so it
+   * resolves the live layer binding (QMK press-time binding). Base MT
+   * silences only its tracked hold (level MT owns no slot and is
+   * re-scanned every poll); base QK_MODS needs no shadow (a held MODS
+   * key always owns a slot, so reaching scan means a fresh press ->
+   * resolve the live layer). >0x00FF filter covers the rest. */
   if (al) {
-    uint16_t b0 = keymap[0][k];
-    uint16_t g = (uint16_t)(b0 & QK_LAYER_MASK);
-    uint8_t b1 = (uint8_t)(b0 >> 8);
-    if (g == QK_MO_BASE || g == QK_TO_BASE ||
-        (b0 & QK_LT_MASK) == QK_LT_BASE ||
-        td_is_td_key(b0))
+    uint8_t b1 = (uint8_t)(keymap[0][k] >> 8);
+    /* MO/TO/LT shadow (issue #2): shadow_activ bitmap tracks layer
+     * activators — keys that pressed when AL==0 and caused the layer
+     * to activate. These positions are silent (they don't emit from
+     * the live layer). Keys pressed when AL>0 (layer already active
+     * via another key) are NOT in the bitmap → resolve normally. */
+    if (shadow_activ & (uint8_t)(1u << k))
       return 0;
     if ((b1 & 0xE0) == 0x20 && mt_packed != 0x07 &&
         (uint8_t)(mt_packed & 0x07) == (uint8_t)(k & 0x07))
@@ -568,6 +595,7 @@ void main(void) {
 
   enc_override_keycode = 0;
   enc_override_timer = 0;
+  shadow_activ = 0; /* no layer activators at boot (issue #2) */
   key_debounced = 0x3F;
   for(i=0;i<6;i++) debounce_cnt[i]=0;
   tt_now = 0; lt_prev_tf0 = 0; /* timebase idle; 0xFC-0xFD reserved placeholders */
