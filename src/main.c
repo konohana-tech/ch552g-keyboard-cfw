@@ -623,7 +623,7 @@ void main(void) {
         if (s < 6) continue;
         kc = scan_keycode(AL_GET(), k);
         if (!kc && !dec_mod) continue;
-        for (s = 0; s < 6; s++) if (slot_pos[s] == 0xFF) { slot_pos[s] = k; slot_kc[s] = kc; slot_mod[s] = dec_mod; report[2+s] = kc; break; }
+        for (s = 0; s < 6; s++) if (slot_pos[s] == 0xFF) { slot_pos[s] = k; slot_kc[s] = kc; slot_mod[s] = dec_mod; report[2+s] = kc; report[0] |= dec_mod; break; }
       }
       report[0] |= mt_hold_mod(); /* MT hold level (issue #1; 0 unless holding past term) */
       if (!(p3 & ENC_SW_PIN)) {
