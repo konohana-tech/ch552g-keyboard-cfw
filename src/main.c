@@ -26,6 +26,12 @@ void USB_ISR(void) __interrupt(INT_NO_USB) { USBInterrupt(); }
 #define QK_TO_BASE 0x5200
 #define QK_LT_BASE 0x4000
 #define QK_LT_MASK 0xF000
+/* Mod-Tap (QMK QK_MOD_TAP 0x2000-0x3FFF, keycodes.h 0.0.9 verified 2026-09-06;
+ * high bytes 0x20-0x2F = left-hand, 0x30-0x3F = right-hand via mods bit4.
+ * Only left-hand is supported here; right-hand stays silent. No overlap
+ * with macro 0x7700 / TD 0x5700 / LT 0x4000. */
+#define QK_MT_BASE 0x2000
+#define QK_MT_MASK 0xE000
 #define QK_LAYER_MASK 0xFFE0
 /* LT tap window ~=196ms (3x65.5ms Timer0; QMK 200ms, ex-TT_TERM_TICKS). */
 #define LT_TERM_TICKS 3
@@ -97,6 +103,64 @@ static void lt_edge(uint8_t k, uint8_t press, uint8_t bl, uint8_t tk) __reentran
     }
     lt_packed = 0x07;
   }
+}
+
+/* Mod-Tap state (issue #1): single tracker mirroring LT (independent of LT).
+ * mt_stamp/mt_packed: press tick + key[2:0] (0x07 = idle, bit7 = hold past
+ * term). mt_mod/mt_tk: press-time HID mod bits + tap key (layer-change safe).
+ * 0x015E-0x015F free (rgb ends 0x015D, UID starts 0x0160); 0x0168+ free. */
+__xdata __at (0x015E) uint8_t mt_stamp;
+__xdata __at (0x015F) uint8_t mt_packed;
+__xdata __at (0x0168) uint8_t mt_mod;
+__xdata __at (0x0169) uint8_t mt_tk;
+/* QK_MODS press-time mod slots: parallel to slot_kc, ORed into report[0]
+ * while held. 0x016A-0x016F free (UID ends 0x0167). */
+__xdata __at (0x016A) uint8_t slot_mod[6];
+/* scan_keycode side-channel: HID mod bits of the just-decoded QK_MODS key
+ * (0 when the key carries no modifier). Read immediately by the caller. */
+__xdata __at (0x0170) uint8_t dec_mod;
+
+/* Mod-Tap edge handler (issue #1; QMK MT(MOD_*,kc), left-hand only).
+ * Lean single tracker mirroring lt_edge: press records (key,tick,mod,tap);
+ * tap-release injects tk via enc_override_* (LT_TAP_POLLS); hold-release does
+ * nothing (hold mod rides the level path mt_hold_mod while held).
+ * Encoding MT = 0x2000|mods<<8|kc (mb bit0-3 = mods, bit4 = right-hand flag;
+ * same byte layout as the macro EXT path). Right-hand press is ignored here
+ * (stays silent). k = matrix index. Overlapping MT presses retrack (same
+ * class of limitation as LT's single tracker, documented). */
+static void mt_edge(uint8_t k, uint8_t press, uint8_t mb, uint8_t tk) __reentrant {
+  uint8_t pk = mt_packed;
+  if (press) {
+    if (mb & 0x10) return; /* right-hand MT unsupported */
+    mt_stamp = tt_now;
+    mt_packed = (uint8_t)(k & 0x07);
+    mt_mod = (uint8_t)(mb & 0x0F); /* left mods ARE the HID mod byte */
+    mt_tk = tk;
+  } else {
+    if ((pk & 0x07) != (k & 0x07)) return; /* stale/untracked release */
+    if (!(pk & 0x80) && mt_tk && (uint8_t)(tt_now - mt_stamp) <= LT_TERM_TICKS) {
+      enc_override_keycode = mt_tk;
+      enc_override_timer = LT_TAP_POLLS;
+    }
+    mt_packed = 0x07;
+  }
+}
+
+/* MT hold level: call every poll, OR the result into report[0]. Past the
+ * shared tap term (== LT term, same tt_now timebase) with the key still held
+ * the press-time mod bits are emitted. Else 0. */
+static uint8_t mt_hold_mod(void) __reentrant {
+  uint8_t pk = mt_packed;
+  uint8_t k, bi;
+  if (pk == 0x07) return 0; /* idle */
+  k = (uint8_t)(pk & 0x07);
+  bi = (k < 3) ? k : (uint8_t)(k - 1);
+  if (key_debounced & (uint8_t)(1u << bi)) { mt_packed = 0x07; return 0; }
+  if ((uint8_t)(tt_now - mt_stamp) > LT_TERM_TICKS) {
+    mt_packed = (uint8_t)(k | 0x80);
+    return mt_mod;
+  }
+  return (pk & 0x80) ? mt_mod : 0;
 }
 
 /* Macro player state: XRAM 0x0124+ (pool is 0x0100-0x0123; SIE/DMA only
@@ -333,6 +397,8 @@ static void debounce_update(void) __reentrant {
             uint8_t ll = (uint8_t)((bkc >> 8) & 0x0F);
             uint8_t tk = (uint8_t)(bkc & 0xFF);
             lt_edge(k, press, ll, tk);
+          } else if ((bkc & QK_MT_MASK) == QK_MT_BASE) {
+            mt_edge(k, press, (uint8_t)(bkc >> 8), (uint8_t)(bkc & 0xFF));
           } else if (press && td_is_td_key(bkc)) {
             td_press(td_get_index(bkc));
           } else if (!press && td_is_td_key(bkc)) {
@@ -350,6 +416,8 @@ static void debounce_update(void) __reentrant {
             if (b0 != KC_TRNS) {
               if ((b0 & QK_LT_MASK) == QK_LT_BASE) {
                 lt_edge(k, 0, (uint8_t)((b0 >> 8) & 0x0F), (uint8_t)(b0 & 0xFF));
+              } else if ((b0 & QK_MT_MASK) == QK_MT_BASE) {
+                mt_edge(k, 0, (uint8_t)(b0 >> 8), (uint8_t)(b0 & 0xFF));
               } else if (td_is_td_key(b0)) {
                 td_release(td_get_index(b0));
               }
@@ -425,21 +493,40 @@ static uint8_t kb_compat(uint8_t kc) __reentrant {
 
 static uint8_t scan_keycode(uint8_t al, uint8_t k) __reentrant {
   uint16_t bkc;
+  dec_mod = 0;
   /* L0 layer-action keys (MO/TO/LT) are consumed as switches: their own
    * position never emits (QMK press-time binding; upper-layer shadowing of
-   * a base switch stays silent by design). >0x00FF filter covers the rest. */
+   * a base switch stays silent by design). Base MT silences only its tracked
+   * hold (level MT owns no slot and is re-scanned every poll); base QK_MODS
+   * needs no shadow (a held MODS key always owns a slot, so reaching scan
+   * means a fresh press -> resolve the live layer). >0x00FF filter covers
+   * the rest. */
   if (al) {
     uint16_t b0 = keymap[0][k];
     uint16_t g = (uint16_t)(b0 & QK_LAYER_MASK);
+    uint8_t b1 = (uint8_t)(b0 >> 8);
     if (g == QK_MO_BASE || g == QK_TO_BASE ||
         (b0 & QK_LT_MASK) == QK_LT_BASE ||
         td_is_td_key(b0))
       return 0;
+    if ((b1 & 0xE0) == 0x20 && mt_packed != 0x07 &&
+        (uint8_t)(mt_packed & 0x07) == (uint8_t)(k & 0x07))
+      return 0;
   }
   bkc = keymap[al][k];
   if (bkc == KC_TRNS) bkc = keymap[0][k]; /* TRNS -> base */
-  if (bkc == 0 || bkc > 0x00FF) return 0; /* NO / action / TD (0x5700+) */
-  return kb_compat((uint8_t)bkc);
+  if (bkc == 0) return 0; /* NO */
+  if (bkc <= 0x00FF) return kb_compat((uint8_t)bkc);
+  { /* QK_MODS left (0x0100-0x0FFF): the high-byte low nibble IS the HID mod
+     * byte (same mapping as the macro EXT path); right-hand (0x10) stays
+     * unsupported. Tap part rides the press-time slots via dec_mod. */
+    uint8_t b1 = (uint8_t)(bkc >> 8);
+    if (b1 >= 0x01 && b1 <= 0x1F && !(b1 & 0x10)) {
+      dec_mod = (uint8_t)(b1 & 0x0F);
+      return kb_compat((uint8_t)(bkc & 0xFF));
+    }
+  }
+  return 0; /* MT / action / TD (0x5700+) / macro (0x7700+) */
 }
 
 void main(void) {
@@ -487,12 +574,13 @@ void main(void) {
   for(i=0;i<6;i++) debounce_cnt[i]=0;
   tt_now = 0; lt_prev_tf0 = 0; /* timebase idle (ex-TT trackers freed) */
   lt_stamp = 0; lt_packed = 0x07; /* LT tracker idle */
+  mt_stamp = 0; mt_packed = 0x07; mt_mod = 0; mt_tk = 0; dec_mod = 0; /* MT/MODS idle */
   mc_play = 0; mc_pos = 0; mc_gap = 0; mc_phase = 0; /* macro player idle */
   ms_wheel_rel = 0; /* mouse wheel idle */
   ms_buttons = 0; /* mouse buttons released */
   mc_kc = 0; mc_mod = 0; mc_dlast = tt_now; mc_dtick = 0;
   mc_hk0 = 0; mc_hm0 = 0; mc_hk1 = 0; mc_hm1 = 0; mc_hk2 = 0; mc_hm2 = 0;
-  for (i = 0; i < 6; i++) { slot_pos[i] = 0xFF; slot_kc[i] = 0; } /* press-time slots idle */
+  for (i = 0; i < 6; i++) { slot_pos[i] = 0xFF; slot_kc[i] = 0; slot_mod[i] = 0; } /* press-time slots idle */
 
   rgb_set_defaults(); /* overwritten by DataFlash LED region if valid */
   vial_init();
@@ -532,8 +620,8 @@ void main(void) {
         uint8_t k = slot_pos[s];
         if (k == 0xFF) { report[2+s] = 0; continue; }
         uint8_t bi = (k < 3) ? k : (uint8_t)(k - 1);
-        if (key_debounced & (uint8_t)(1u << bi)) { slot_pos[s] = 0xFF; slot_kc[s] = 0; report[2+s] = 0; }
-        else report[2+s] = slot_kc[s];
+        if (key_debounced & (uint8_t)(1u << bi)) { slot_pos[s] = 0xFF; slot_kc[s] = 0; slot_mod[s] = 0; report[2+s] = 0; }
+        else { report[2+s] = slot_kc[s]; report[0] |= slot_mod[s]; }
       }
       for (i = 0; i < 6; i++) {
         uint8_t k;
@@ -542,9 +630,16 @@ void main(void) {
         for (s = 0; s < 6; s++) if (slot_pos[s] == k) break;
         if (s < 6) continue;
         kc = scan_keycode(AL_GET(), k);
-        if (!kc) continue;
-        for (s = 0; s < 6; s++) if (slot_pos[s] == 0xFF) { slot_pos[s] = k; slot_kc[s] = kc; report[2+s] = kc; break; }
+        if (!kc && !dec_mod) continue;
+        /* HOLD_ON_OTHER_KEY_PRESS (issue #1): a fresh matrix press forces a
+         * pending (undecided) MT straight to hold, so the chord leaves in
+         * one report with the mod set. MT keys never reach here (scan gives
+         * 0/0 -> continue); they retrack in mt_edge instead. Enc-sw has no
+         * edge infra so it does not force (documented exception). */
+        if (mt_packed != 0x07) mt_packed |= 0x80;
+        for (s = 0; s < 6; s++) if (slot_pos[s] == 0xFF) { slot_pos[s] = k; slot_kc[s] = kc; slot_mod[s] = dec_mod; report[2+s] = kc; report[0] |= dec_mod; break; }
       }
+      report[0] |= mt_hold_mod(); /* MT hold level (issue #1; 0 unless holding past term) */
       if (!(p3 & ENC_SW_PIN)) {
         uint16_t swb = keymap[AL_GET()][7];
         if (swb == KC_TRNS) swb = keymap[0][7];
@@ -555,6 +650,7 @@ void main(void) {
           if (want != ms_buttons) { ms_buttons = want; usb_send_mouse(0, 0, want, (int8_t)0); }
         } else {
           kc = scan_keycode(AL_GET(), 7);
+          if (dec_mod) report[0] |= dec_mod; /* enc-sw QK_MODS level (MT silent here: no edge infra) */
           if (kc) { for (i = 2; i < 8; i++) if (report[i] == 0) { report[i] = kc; break; } }
           if (ms_buttons) { ms_buttons = 0; usb_send_mouse(0, 0, 0, (int8_t)0); }
         }
