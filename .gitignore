@@ -1,5 +1,7 @@
 build/
 toolchain/
+__pycache__/
+*.pyc
 *.deb
 *.rel
 *.ihx
