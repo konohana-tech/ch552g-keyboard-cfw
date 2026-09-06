@@ -18,11 +18,10 @@ void USB_ISR(void) __interrupt(INT_NO_USB) { USBInterrupt(); }
 #define DEBOUNCE_THRESHOLD 4 /* ~0.8ms window @12MHz poll (was 2 @6MHz) */
 
 /* QMK layer keycodes (quantum/keycodes.h, verified 2026-09-04):
- * TO=0x5200, MO=0x5220, TG=0x5260 (+layer 0-31). TT=0x52C0 ABOLISHED.
+ * TO=0x5200, MO=0x5220 (+layer 0-31). TT=0x52C0 ABOLISHED.
  * KC_NO=0x0000, KC_TRNS=0x0001. */
 #define QK_MO_BASE 0x5220
 #define QK_MO_MASK 0xFFE0
-#define QK_TG_BASE 0x5260
 #define QK_TO_BASE 0x5200
 #define QK_LT_BASE 0x4000
 #define QK_LT_MASK 0xF000
@@ -33,7 +32,7 @@ void USB_ISR(void) __interrupt(INT_NO_USB) { USBInterrupt(); }
 #define QK_MT_BASE 0x2000
 #define QK_MT_MASK 0xE000
 #define QK_LAYER_MASK 0xFFE0
-/* LT tap window ~=196ms (3x65.5ms Timer0; QMK 200ms, ex-TT_TERM_TICKS). */
+/* LT tap window ~=196ms (3x65.5ms Timer0; QMK default 200ms). */
 #define LT_TERM_TICKS 3
 #define KC_TRNS 0x0001
 
@@ -56,12 +55,12 @@ static uint8_t debounce_cnt[6];
 
 /* Layer-tap timebase: 1B xdata @0xFB (build.sh guard-allowlisted with
  * fx_base; SIE/DMA never touch >=0xFB). tt_now: free-running 65.5ms ticks
- * (tt_tick owns TF0 clear-on-read). Ex-TT tracker (tt_stamp/tt_packed @0xFC-0xFD)
- * freed by TT abolition. LT tap state stays @0xFE-0xFF. */
+ * (tt_tick owns TF0 clear-on-read). Reserved slots @0xFC-0xFD (unused
+ * placeholders). LT tap state stays @0xFE-0xFF. */
 __xdata __at (0x00FB) uint8_t tt_now;
 
 /* LT tap state: 2B xdata @0xFE-0xFF (guard-allowlisted lt_*; same window
- * discipline as TT). lt_stamp: press tick of in-progress LT tap.
+ * discipline). lt_stamp: press tick of in-progress LT tap.
  * lt_packed: key[2:0] (7=none). Tap release injects via enc_override_*
  * (shared with encoder; rare overlap documented). RAM-only. */
 __xdata __at (0x00FE) uint8_t lt_stamp;
@@ -72,8 +71,8 @@ __xdata __at (0x00FF) uint8_t lt_packed;
 
 /* Layer-tap timebase: tt_tick OWNS TF0 (clear-on-read every poll).
  * Poll (~2ms) << tick (65.5ms) so at most one overflow per poll. */
-__xdata __at (0x00FC) uint8_t lt_prev_tf0; /* reserved (edge detect removed) */
-__xdata __at (0x00FD) uint8_t tt_tick_cnt; /* reserved (was tt_now debug counter, now unwritten) */
+__xdata __at (0x00FC) uint8_t lt_prev_tf0; /* reserved placeholder (unused) */
+__xdata __at (0x00FD) uint8_t tt_tick_cnt; /* reserved placeholder (unused) */
 static void tt_tick(void) __reentrant {
   if (TF0) {
     TF0 = 0;
@@ -340,15 +339,14 @@ static void macro_poll(void) __reentrant {
     mc_kc = kc; mc_mod = mod; mc_phase = 1; mc_gap = MACRO_HOLD_POLLS;
   }
 }
- /* Debounce + TG/TO toggle (moved out of main: overlay, gotcha #39).
+ /* Debounce + TO toggle (moved out of main: overlay, gotcha #39).
  * Layer latch bits live in debounce_cnt[0..2] bit7 (counters only count 0..4,
  * so bit7 is free) — every counter reset MUST preserve it (&= 0x80) and the
  * threshold compare MUST mask (& 0x7F). Toggle fires once per debounced
  * PRESS (release never toggles) and follows the same effective-binding rule
  * as scan_keycode (active layer, TRNS->base), so upper-layer shadowing works
- * QMK-faithful. TG flips its bit; TO(n) clears all latch bits then sets n
- * (TO(0) = back to base). TG on the encoder switch is unsupported (no
- * debounce/edge infra there); TG(0) is ignored. Latch is RAM-only. */
+ * QMK-faithful. TO(n) clears all latch bits then sets n
+ * (TO(0) = back to base). Latch is RAM-only. */
 static void debounce_update(void) __reentrant {
   uint8_t raw = 0;
   uint8_t p1 = P1, p3 = P3;
@@ -371,8 +369,8 @@ static void debounce_update(void) __reentrant {
         debounce_cnt[i] &= 0x80;
         { /* layer-action edge. PRESS sees pre-press AL (correct press-time
            * binding). RELEASE sees stale-held AL (resolve hasn't reacted to
-           * this release yet), so TT/LT prefer the effective binding
-           * (shadow press) with L0 fallback (base press). TG/TO fire on
+           * this release yet), so LT prefers the effective binding
+           * (shadow press) with L0 fallback (base press). TO fires on
            * PRESS only. */
           uint8_t k = (i < 3) ? i : (uint8_t)(i + 1);
           uint8_t alx = AL_GET();
@@ -429,7 +427,7 @@ static void debounce_update(void) __reentrant {
   }
 }
 
-/* Layer helpers (MO/TG/TT/TO): split from main's poll loop (overlay-frugal,
+/* Layer helpers (MO/TO/LT): split from main's poll loop (overlay-frugal,
  * gotcha #39). resolve reads P3 directly so it takes no params;
  * scan returns the emittable byte (0 = nothing) with TRNS->base inside. */
 /* NOTE: __reentrant (stack frames, NOT overlay): IRAM overlay pool is full
@@ -466,7 +464,7 @@ static uint8_t layer_resolve(void) __reentrant {
       if (ll < VIAL_LAYERS && ll > al) al = ll;
     }
   }
-  /* TG/TO latch (debounce_cnt[0..2] bit7 = layers 1..3; TO writes the same
+  /* TO latch (debounce_cnt[0..2] bit7 = layers 1..3; TO writes the same
    * bits exclusively): highest latched wins together with the MO max. */
   {
     uint8_t t = 3;
@@ -572,7 +570,7 @@ void main(void) {
   enc_override_timer = 0;
   key_debounced = 0x3F;
   for(i=0;i<6;i++) debounce_cnt[i]=0;
-  tt_now = 0; lt_prev_tf0 = 0; /* timebase idle (ex-TT trackers freed) */
+  tt_now = 0; lt_prev_tf0 = 0; /* timebase idle; 0xFC-0xFD reserved placeholders */
   lt_stamp = 0; lt_packed = 0x07; /* LT tracker idle */
   mt_stamp = 0; mt_packed = 0x07; mt_mod = 0; mt_tk = 0; dec_mod = 0; /* MT/MODS idle */
   mc_play = 0; mc_pos = 0; mc_gap = 0; mc_phase = 0; /* macro player idle */
@@ -606,8 +604,8 @@ void main(void) {
       }
     }
 
-    tt_tick(); /* TT timebase (TF0 edge, read-only) */
-    debounce_update(); /* debounce + TG/TO toggle + TT edges (reentrant) */
+    tt_tick(); /* 65.5ms timebase (TF0 edge, read-only) */
+    debounce_update(); /* debounce + TO/LT/MT/TD edges (reentrant) */
 
     /* Layer resolve + press-time emit. Held slots keep their press-time
      * keycode across layer changes (single input per press); fresh presses

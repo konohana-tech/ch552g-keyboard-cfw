@@ -20,7 +20,6 @@
 #define MANUFACTURER_STR    'k','o','n','o','h','a','n','a'
 #define PRODUCT_STR         'C','H','5','5','2','G','-','K','B','D'
 #define SERIAL_STR          'v','i','a','l',':','f','6','4','c','2','b','3','c'
-#define INTERFACE_STR       'K','e','y','b','o','a','r','d'
 
 // Key count (matrix: 2 rows x 4 cols = 8)
 #define NUM_KEYS 8
@@ -47,14 +46,5 @@
  *    Once unlocked it stays unlocked until vial_lock (FE08) or power cycle.
  *  - While locked, Vial SET commands (FE04, 05, 13) are ignored; GET commands
  *    still respond so the GUI can show the locked overlay. */
-
-// Default HID keycodes (USB HID Usage Table, Keyboard/Keypad Page)
-// Used to initialize keymap[0] on boot; remap via Vial later.
-#define KEYCODE_KEY1 0x1E    // '1'
-#define KEYCODE_KEY2 0x1F    // '2'
-#define KEYCODE_KEY3 0x20    // '3'
-#define KEYCODE_KEY4 0x21    // '4'
-#define KEYCODE_KEY5 0x22    // '5'
-#define KEYCODE_KEY6 0x23    // '6'
 
 #endif
