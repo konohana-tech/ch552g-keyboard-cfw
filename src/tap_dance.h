@@ -27,4 +27,9 @@ void td_press(uint8_t idx);
 void td_release(uint8_t idx);
 void td_task(void);
 uint8_t td_pending_key(void);
+/* issue #18 (QMK preprocess_tap_dance interrupt): notify a press that
+ * occurred while a TD is held undecided. td_idx = pressed TD index, or
+ * 0xFF when the pressed key is not a TD. Settles HOLD synchronously;
+ * the TD's own second tap and released-waiting dances are excluded. */
+void td_notify_press(uint8_t td_idx);
 #endif
