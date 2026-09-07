@@ -58,6 +58,11 @@ __xdata __at (0x0172) uint8_t pd_s; /* captured slot, 0xFF = none */
  * the ~10-25ms window. Chain it after: pending keycode (0 = none), loaded
  * into enc_override_* when the tap override expires. 0x0173 free. */
 __xdata __at (0x0173) uint8_t mt_pend;
+/* issue #13 (QMK store_or_get_action source-layer cache, lean form):
+ * press-time full 16-bit binding per debounce position, so release uses
+ * the same binding even if the layer changed mid-hold. 0x0174+ free
+ * (mt_pend ends 0x0173). Indexed by i (0-5), same i at press/release. */
+__xdata __at (0x0174) uint16_t slot_pkc[6];
 
 /* Layer state: NO free IRAM (0x1F = fx_phase) and XRAM <0x100 fully mapped
  * (XSEG auto-place lands in SIE-owned EP0_buffer 0x00-0x09 — gotcha #9:
@@ -415,6 +420,10 @@ static void debounce_update(void) {
           uint8_t alx = AL_GET();
           uint16_t bkc = alx ? keymap[alx][k] : keymap[0][k];
           if (bkc == KC_TRNS) bkc = keymap[0][k];
+          /* issue #13b (QMK store_or_get_action): release always uses the
+           * press-time binding, so a live upper-layer TD/MT/LT can never
+           * hijack the release of the key actually pressed. */
+          if (!press && slot_pkc[i]) bkc = slot_pkc[i];
           /* Shadow activator tracking (issue #2): when a MO/TO/LT key
            * presses and the layer was NOT active before (alx==0), mark it
            * as a layer activator. scan_keycode shadows these positions.
@@ -431,6 +440,10 @@ static void debounce_update(void) {
               shadow_activ &= (uint8_t)~(1u << k);
             }
           }
+          /* issue #13: stash the effective press-time binding (TRNS-resolved)
+           * so release uses the same binding even if the layer changed
+           * mid-hold (QMK store_or_get_action, lean form). */
+          if (press) slot_pkc[i] = bkc;
           /* TO(n) is press-only: gate the branch on press so a RELEASE seen
            * through a TO binding (e.g. LT on L0, TO on L1: release resolves
            * with the stale-held layer) falls through to the L0 fallback
@@ -462,17 +475,17 @@ static void debounce_update(void) {
              * scan_keycode already silences it (>0x00FF -> 0). */
             mc_start((uint8_t)(bkc & 0x7F));
           } else if (!press) {
-            /* release with non-action effective binding: L0 press-time
-             * fallback (AL is stale-held here, so a release seen through
-             * an upper-layer TO/MO/plain binding still finds the L0 LT/TD). */
-            uint16_t b0 = keymap[0][k];
-            if (b0 != KC_TRNS) {
-              if ((b0 & QK_LT_MASK) == QK_LT_BASE) {
-                lt_edge(k, 0, (uint8_t)((b0 >> 8) & 0x0F), (uint8_t)(b0 & 0xFF));
-              } else if ((b0 & QK_MT_MASK) == QK_MT_BASE) {
-                mt_edge(k, 0, (uint8_t)(b0 >> 8), (uint8_t)(b0 & 0xFF));
-              } else if (td_is_td_key(b0)) {
-                td_release(td_get_index(b0));
+            /* Safety net: bkc already equals the press-time binding (see the
+             * override above), so this re-check only matters for exotic
+             * paths (e.g. empty cache). Re-check the cache for LT/MT/TD. */
+            uint16_t pkc = slot_pkc[i];
+            if (pkc != KC_TRNS) {
+              if ((pkc & QK_LT_MASK) == QK_LT_BASE) {
+                lt_edge(k, 0, (uint8_t)((pkc >> 8) & 0x0F), (uint8_t)(pkc & 0xFF));
+              } else if ((pkc & QK_MT_MASK) == QK_MT_BASE) {
+                mt_edge(k, 0, (uint8_t)(pkc >> 8), (uint8_t)(pkc & 0xFF));
+              } else if (td_is_td_key(pkc)) {
+                td_release(td_get_index(pkc));
               }
             }
           }
@@ -640,7 +653,7 @@ void main(void) {
   ms_buttons = 0; /* mouse buttons released */
   mc_kc = 0; mc_mod = 0; mc_dlast = tt_now; mc_dtick = 0;
   mc_hk0 = 0; mc_hm0 = 0; mc_hk1 = 0; mc_hm1 = 0; mc_hk2 = 0; mc_hm2 = 0;
-  for (i = 0; i < 6; i++) { slot_pos[i] = 0xFF; slot_kc[i] = 0; slot_mod[i] = 0; } /* press-time slots idle */
+  for (i = 0; i < 6; i++) { slot_pos[i] = 0xFF; slot_kc[i] = 0; slot_mod[i] = 0; slot_pkc[i] = 0; } /* press-time slots idle */
 
   rgb_set_defaults(); /* overwritten by DataFlash LED region if valid */
   vial_init();
