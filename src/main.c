@@ -565,11 +565,11 @@ static uint8_t kb_compat(uint8_t kc) {
 static uint8_t scan_keycode(uint8_t al, uint8_t k) {
   uint16_t bkc;
   dec_mod = 0;
-  /* Layer-action shadow (issue #2, shadow_activ bitmap): a position whose
-   * base key is MO/TO/LT stays silent while it is the layer activator
-   * (pressed when AL==0 and holding the layer). A position pressed after
-   * another key already activated the layer is NOT in the bitmap, so it
-   * resolves the live layer binding (QMK press-time binding). Base MT
+  /* Layer-action shadow (issue #2, extended #12b): a position pressed as
+   * MO/TO/LT stays silent while it is the layer activator (holding the
+   * layer). Marking uses the press-time binding, so upper-layer MO/TO/LT
+   * are shadowed too. A position pressed as plain on AL>0 is NOT in the
+   * bitmap, so it resolves the live layer binding. Base MT
    * silences only its tracked hold (level MT owns no slot and is
    * re-scanned every poll); base QK_MODS needs no shadow (a held MODS
    * key always owns a slot, so reaching scan means a fresh press ->
