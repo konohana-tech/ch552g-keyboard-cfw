@@ -571,6 +571,7 @@ static uint8_t scan_keycode(uint8_t al, uint8_t k) {
   }
   bkc = keymap[al][k];
   if (bkc == KC_TRNS) bkc = keymap[0][k]; /* TRNS -> base */
+  if (bkc == KC_TRNS) return 0; /* TRNS on L0: no action (QMK-faithful) */
   if (bkc == 0) return 0; /* NO */
   if (bkc <= 0x00FF) return kb_compat((uint8_t)bkc);
   { /* QK_MODS left (0x0100-0x0FFF): the high-byte low nibble IS the HID mod
@@ -767,7 +768,7 @@ void main(void) {
            * + zero-release via ms_wheel_rel. Else legacy keyboard override. */
           if(em==0x00D9){ usb_send_mouse(0,0,ms_buttons,(int8_t)1); ms_wheel_rel=10; }
           else if(em==0x00DA){ usb_send_mouse(0,0,ms_buttons,(int8_t)-1); ms_wheel_rel=10; }
-          else { enc_override_keycode=kb_compat((uint8_t)em); enc_override_timer=10; }
+          else if (em != KC_TRNS) { enc_override_keycode=kb_compat((uint8_t)em); enc_override_timer=10; }
           if(accum>=4) accum-=4; else accum+=4;
         }
       }
