@@ -424,17 +424,16 @@ static void debounce_update(void) {
            * press-time binding, so a live upper-layer TD/MT/LT can never
            * hijack the release of the key actually pressed. */
           if (!press && slot_pkc[i]) bkc = slot_pkc[i];
-          /* Shadow activator tracking (issue #2): when a MO/TO/LT key
-           * presses and the layer was NOT active before (alx==0), mark it
-           * as a layer activator. scan_keycode shadows these positions.
-           * When AL>0 at press time, the key is a fresh press → not marked
-           * → resolves live layer binding. */
+          /* Shadow activator tracking (issue #2, extended #12b): mark when
+           * the key was PRESSED as MO/TO/LT on any layer (bkc is the
+           * TRNS-resolved press-time binding). scan_keycode shadows these
+           * positions. A key pressed as plain on AL>0 is still not marked
+           * → resolves live layer binding (issue #2 intent preserved). */
           {
-            uint16_t b0 = keymap[0][k];
-            uint16_t g0 = (uint16_t)(b0 & QK_LAYER_MASK);
-            if (press && alx == 0 &&
+            uint16_t g0 = (uint16_t)(bkc & QK_LAYER_MASK);
+            if (press &&
                 (g0 == QK_MO_BASE || g0 == QK_TO_BASE ||
-                 (b0 & QK_LT_MASK) == QK_LT_BASE)) {
+                 (bkc & QK_LT_MASK) == QK_LT_BASE)) {
               shadow_activ |= (uint8_t)(1u << k);
             } else if (!press) {
               shadow_activ &= (uint8_t)~(1u << k);
@@ -510,7 +509,13 @@ static uint8_t layer_resolve(void) {
     uint8_t k;
     if (key_debounced & (1u << j)) continue;
     k = (j < 3) ? j : (uint8_t)(j + 1);
-    bkc = keymap[0][k];
+    /* issue #12 (QMK press-time action): a held key contributes the MO/LT
+     * layer it was pressed as (slot_pkc, #13), not the live layer. A key
+     * pressed as plain never promotes to an upper MO/LT even if the layer
+     * later rose; a key pressed as upper MO/LT keeps holding its layer
+     * after its activator is gone. No iteration needed. */
+    bkc = slot_pkc[j];
+    if (!bkc) bkc = keymap[0][k]; /* safety: pre-cache hold */
     /* MO held = momentary layer (QMK press behavior). */
     if ((bkc & QK_MO_MASK) == QK_MO_BASE) {
       uint8_t bl = (uint8_t)(bkc & 0x1F);
@@ -560,11 +565,11 @@ static uint8_t kb_compat(uint8_t kc) {
 static uint8_t scan_keycode(uint8_t al, uint8_t k) {
   uint16_t bkc;
   dec_mod = 0;
-  /* Layer-action shadow (issue #2, shadow_activ bitmap): a position whose
-   * base key is MO/TO/LT stays silent while it is the layer activator
-   * (pressed when AL==0 and holding the layer). A position pressed after
-   * another key already activated the layer is NOT in the bitmap, so it
-   * resolves the live layer binding (QMK press-time binding). Base MT
+  /* Layer-action shadow (issue #2, extended #12b): a position pressed as
+   * MO/TO/LT stays silent while it is the layer activator (holding the
+   * layer). Marking uses the press-time binding, so upper-layer MO/TO/LT
+   * are shadowed too. A position pressed as plain on AL>0 is NOT in the
+   * bitmap, so it resolves the live layer binding. Base MT
    * silences only its tracked hold (level MT owns no slot and is
    * re-scanned every poll); base QK_MODS needs no shadow (a held MODS
    * key always owns a slot, so reaching scan means a fresh press ->
