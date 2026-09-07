@@ -424,16 +424,18 @@ static void debounce_update(void) {
            * press-time binding, so a live upper-layer TD/MT/LT can never
            * hijack the release of the key actually pressed. */
           if (!press && slot_pkc[i]) bkc = slot_pkc[i];
-          /* Shadow activator tracking (issue #2, extended #12b): mark when
-           * the key was PRESSED as MO/TO/LT on any layer (bkc is the
-           * TRNS-resolved press-time binding). scan_keycode shadows these
+          /* Shadow activator tracking (issue #2, extended #12b/#17): mark when
+           * the key was PRESSED as MO/TO/LT/TD/Macro on any layer (bkc is
+           * the TRNS-resolved press-time binding). scan_keycode shadows these
            * positions. A key pressed as plain on AL>0 is still not marked
            * → resolves live layer binding (issue #2 intent preserved). */
           {
             uint16_t g0 = (uint16_t)(bkc & QK_LAYER_MASK);
             if (press &&
                 (g0 == QK_MO_BASE || g0 == QK_TO_BASE ||
-                 (bkc & QK_LT_MASK) == QK_LT_BASE)) {
+                 (bkc & QK_LT_MASK) == QK_LT_BASE ||
+                 td_is_td_key(bkc) ||
+                 (bkc & QK_MACRO_MASK) == QK_MACRO_BASE)) {
               shadow_activ |= (uint8_t)(1u << k);
             } else if (!press) {
               shadow_activ &= (uint8_t)~(1u << k);
@@ -565,8 +567,8 @@ static uint8_t kb_compat(uint8_t kc) {
 static uint8_t scan_keycode(uint8_t al, uint8_t k) {
   uint16_t bkc;
   dec_mod = 0;
-  /* Layer-action shadow (issue #2, extended #12b): a position pressed as
-   * MO/TO/LT stays silent while it is the layer activator (holding the
+  /* Layer-action shadow (issue #2, extended #12b/#17): a position pressed as
+   * MO/TO/LT/TD/Macro stays silent while it is the layer activator (holding the
    * layer). Marking uses the press-time binding, so upper-layer MO/TO/LT
    * are shadowed too. A position pressed as plain on AL>0 is NOT in the
    * bitmap, so it resolves the live layer binding. Base MT
