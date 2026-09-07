@@ -470,15 +470,17 @@ static void debounce_update(void) {
             td_press(td_get_index(bkc));
           } else if (!press && td_is_td_key(bkc)) {
             td_release(td_get_index(bkc));
-          } else if (press) {
-            /* issue #18: foreign key press while TD undecided → notify
-             * (foreign TD index or 0xFF for non-TD). */
-            td_notify_press(td_is_td_key(bkc) ? td_get_index(bkc) : 0xFF);
           } else if (press && (bkc & QK_MACRO_MASK) == QK_MACRO_BASE &&
                      (bkc & 0x7F) < MACRO_COUNT) {
             /* Macro key: fire once per debounced PRESS (release ignored).
              * scan_keycode already silences it (>0x00FF -> 0). */
             mc_start((uint8_t)(bkc & 0x7F));
+          } else if (press) {
+            /* issue #18: foreign key press while TD undecided → notify
+             * (foreign TD index or 0xFF for non-TD). Placed after the
+             * macro branch (#21): an unconditional `press` here would
+             * shadow it and make macro dead code. */
+            td_notify_press(td_is_td_key(bkc) ? td_get_index(bkc) : 0xFF);
           } else if (!press) {
             /* Safety net: bkc already equals the press-time binding (see the
              * override above), so this re-check only matters for exotic
